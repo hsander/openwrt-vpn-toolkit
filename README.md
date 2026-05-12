@@ -95,12 +95,6 @@ ssh-keygen -p -f ~/.ssh/openwrt_<alias>_ed25519
 ```
 и держи открытым `ssh-agent`. Скрипты использут `IdentitiesOnly yes` + agent через `~/.ssh/config`, так что passphrase будет запрашиваться при каждой сессии (или один раз через `ssh-add`).
 
-## Что было раньше
-
-Этот навык — форк прототипа `ssh-claude/openwrt-vpn-kit`. Архитектурный design-doc — `PROPOSAL.md` (наследие, для контекста; **SKILL.md приоритетнее** при противоречиях).
-
-Тесты прежней модели лежат в `.claude/skills/openwrt/tests/legacy/` — будут переписаны под `bin/*` отдельной задачей.
-
 ## Лицензия
 
 TBD.
