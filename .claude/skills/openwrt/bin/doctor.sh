@@ -91,9 +91,18 @@ mkdir -p "$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS"
 OK="✓"
 FAIL="✗"
 SKIP="—"
+WARN="⚠"
 
 # Extract fields
 get() { printf '%s' "$probe_json" | jq -r "$1"; }
+
+# Probe reliability — если jq нет на роутере (или config битый), весь блок
+# полей, который требует парсинга JSON (outbounds/rule_set), НЕДОСТОВЕРЕН.
+# Старые версии _doctor_remote.sh могут не эмитить эти поля; в таком случае
+# fallback на reliable=true и пустой список причин — это безопасный дефолт
+# (мы просто не хуже, чем было).
+probe_reliable="$(printf '%s' "$probe_json" | jq -r '.probe_reliable // true' 2>/dev/null)"
+degraded_reasons="$(printf '%s' "$probe_json" | jq -r '(.degraded_reasons // []) | join(", ")' 2>/dev/null)"
 
 openwrt_version="$(get '.openwrt_version')"
 openwrt_target="$(get '.openwrt_target')"
@@ -114,6 +123,9 @@ outbound_count=$(get '.config.outbound_count')
 outbound_tags="$(get '.config.outbound_tags')"
 has_failover=$(get '.config.has_auto_failover')
 rules_present=$(get '.rules.present')
+# Новые поля (могут отсутствовать в старом probe — тогда дефолтятся).
+rules_count="$(printf '%s' "$probe_json" | jq -r '.rules.count // 0' 2>/dev/null)"
+rules_files="$(printf '%s' "$probe_json" | jq -r '(.rules.files // []) | join(", ")' 2>/dev/null)"
 tproxy_installed=$(get '.tproxy.installed')
 tproxy_running=$(get '.tproxy.running')
 
@@ -221,12 +233,23 @@ if [ "$config_present" = "false" ]; then
   singbox_config_details="config.json отсутствует"
 elif [ "$config_valid" = "false" ]; then
   singbox_config_details="config.json есть, но \`sing-box check\` фейлится"
+elif [ "$probe_reliable" = "false" ]; then
+  singbox_config_ok="$WARN"
+  singbox_config_details="config валиден; outbound_count не достоверен — probe degraded ($degraded_reasons)"
 else
   singbox_config_details="валиден, outbounds=$outbound_count"
 fi
 
-rules_ok="$(bool_to_icon "$rules_present")"
-rules_details="rules/vpn-domains.json"
+# Row 12: rule-set файлы в /etc/sing-box/rules/. Имена варьируются между установками
+# (vpn-domains.json / user-vpn-domains.json / tg-pin-domains.json / pin-*.json),
+# поэтому считаем КОЛИЧЕСТВО и показываем список, а не проверяем фиксированное имя.
+if [ "${rules_count:-0}" -ge 1 ]; then
+  rules_ok="$OK"
+  rules_details="$rules_count файл(а): $rules_files"
+else
+  rules_ok="$FAIL"
+  rules_details="нет *.json в /etc/sing-box/rules/"
+fi
 
 if [ "$tproxy_running" = "true" ]; then
   tproxy_ok="$OK"; tproxy_details="запущен"
@@ -236,7 +259,11 @@ else
   tproxy_ok="$FAIL"; tproxy_details="нет /etc/init.d/sing-box-tproxy"
 fi
 
-if [ "$has_failover" = "true" ] && [ "${outbound_count:-0}" -ge 2 ]; then
+if [ "$probe_reliable" = "false" ]; then
+  # Без надёжного парсинга нельзя утверждать ни "нет outbound'ов", ни их число.
+  vpn_outbound_ok="$WARN"
+  vpn_outbound_details="probe degraded ($degraded_reasons) — не могу сосчитать outbounds"
+elif [ "$has_failover" = "true" ] && [ "${outbound_count:-0}" -ge 2 ]; then
   vpn_outbound_ok="$OK"; vpn_outbound_details="$outbound_count outbounds, есть auto-failover"
 elif [ "${outbound_count:-0}" -ge 1 ]; then
   vpn_outbound_ok="$FAIL"; vpn_outbound_details="$outbound_count outbounds, но auto-failover нет"
