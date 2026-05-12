@@ -48,6 +48,15 @@
     "last_modified_at": {"type": "string", "format": "date-time"},
     "skill_version": {"type": "string", "description": "SemVer of the skill package that performed the install."},
     "profile": {"enum": ["minimal", "standard", "advanced"]},
+    "source": {
+      "enum": ["install", "adopt"],
+      "description": "How this state record was created. 'install' = produced by install-vpn.sh from scratch on a clean router. 'adopt' = produced by adopt.sh against a router that was already set up (manually or by another tool). When 'adopt', files_owned_by_skill stays narrow (only what adopt.sh genuinely owns, e.g. rollback runtime); the user's pre-existing sing-box config and rule sets are NOT marked as owned."
+    },
+    "adopted_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Set by adopt.sh on its initial run. Absent for 'install' source. Distinct from installed_at so that an upgrade path 'adopted → later fully installed' could preserve both timestamps."
+    },
 
     "router_identity": {
       "type": "object",

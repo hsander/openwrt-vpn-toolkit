@@ -11,6 +11,7 @@ description: Безопасная настройка и обслуживание
 
 - Пользователь упоминает имя роутера из `memory/routers.yaml`
 - "Настрой роутер", "первичная настройка openwrt", "добавь домен в VPN", "добавь новый VPN", "пробрось proxy", "сделай backup", "откати"
+- "Адоптируй роутер", "синхронизируй memory", "у меня уже настроен sing-box, помоги управлять", "install-vpn упал с existing-sing-box-config-not-owned" → **runbook `runbooks/06-adopt-existing.md` + `bin/adopt.sh`** (read-only sync без модификации роутера)
 - В чате видишь `vless://...`, `bot<digits>:<token>`, host `192.168.1.1` или подобный
 
 ## Жёсткие правила
@@ -31,6 +32,7 @@ bin/                   # ← safe API. Каждый скрипт — атома�
   setup-ssh.sh         # gen ed25519 + install + ~/.ssh/config alias
   setup-watchdog.sh    # /etc/router-watchdog.conf + cron
   install-vpn.sh       # парсит vless://, поднимает sing-box на чистом роутере
+  adopt.sh             # уже настроенный роутер → snapshot + probe + рендер memory (read-only)
   add-domain.sh        # → rules/vpn-domains.json, validate, hot reload
   remove-domain.sh
   add-vpn.sh           # outbound + auto-failover + zapret vpn_servers set

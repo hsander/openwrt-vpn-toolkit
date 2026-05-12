@@ -95,6 +95,75 @@ if [ "$config_valid" = "1" ] && command -v jq >/dev/null 2>&1; then
   echo "$outbound_tags" | grep -q 'auto-failover' && has_failover=1
 fi
 
+# --- adopt-mode probe: structural detail (no secrets) ---------------------
+# Defaults: empty arrays. Filled only when config.json exists AND jq parses it.
+# STRICT secret hygiene: only tag/type/server/server_port for outbounds;
+# only tag/type/listen/listen_port for inbounds. No uuid/password/keys.
+outbounds_detail_json='[]'
+inbounds_detail_json='[]'
+rule_set_domains_json='[]'
+config_proxy_ports_json='[]'
+
+if [ -f /etc/sing-box/config.json ] && command -v jq >/dev/null 2>&1; then
+  # Validate that the file is parseable JSON before we trust any reads.
+  if jq -e . /etc/sing-box/config.json >/dev/null 2>&1; then
+    # outbounds_detail: keep ONLY tag/type/server/server_port.
+    # Pick outbounds with a non-null tag (skip anything we can't cleanly identify).
+    _od="$(jq -c '
+      [
+        (.outbounds // [])[]
+        | select(type == "object")
+        | select(.tag != null and .tag != "")
+        | select(.type != null and .type != "")
+        | {
+            tag:         (.tag | tostring),
+            type:        (.type | tostring),
+            server:      (if (.server // null) == null then null else (.server | tostring) end),
+            server_port: (if (.server_port // null) == null then 0 else (.server_port | tonumber? // 0) end)
+          }
+      ]
+    ' /etc/sing-box/config.json 2>/dev/null)"
+    [ -n "$_od" ] && outbounds_detail_json="$_od"
+
+    # inbounds_detail: only mixed/socks/http; tag/type/listen/listen_port.
+    _id="$(jq -c '
+      [
+        (.inbounds // [])[]
+        | select(type == "object")
+        | select(.type == "mixed" or .type == "socks" or .type == "http")
+        | {
+            tag:         ((.tag // "") | tostring),
+            type:        (.type | tostring),
+            listen:      ((.listen // "") | tostring),
+            listen_port: ((.listen_port // 0) | tonumber? // 0)
+          }
+      ]
+    ' /etc/sing-box/config.json 2>/dev/null)"
+    [ -n "$_id" ] && inbounds_detail_json="$_id"
+
+    # config_proxy_ports: flat int list, derived from inbounds_detail.
+    _cp="$(printf '%s' "$_id" | jq -c '
+      [ .[] | .listen_port | select(. != null and . != 0) ] | unique
+    ' 2>/dev/null)"
+    [ -n "$_cp" ] && config_proxy_ports_json="$_cp"
+
+    # rule_set_domains: flatten any string under route.rules[].domain and
+    # route.rule_set[..].domain (covers domain as string OR array of strings).
+    _rd="$(jq -c '
+      def flat_domains(x):
+        if x == null then []
+        elif (x | type) == "string" then [x]
+        elif (x | type) == "array" then [ x[] | select(type == "string") ]
+        else [] end;
+      [
+        ( (.route.rules // [])[]?     | flat_domains(.domain) ),
+        ( (.route.rule_set // [])[]?  | flat_domains(.domain) )
+      ] | flatten | unique
+    ' /etc/sing-box/config.json 2>/dev/null)"
+    [ -n "$_rd" ] && rule_set_domains_json="$_rd"
+  fi
+fi
+
 # DNS chain
 peerdns="$(uci -q get network.wan.peerdns 2>/dev/null)"
 [ -z "$peerdns" ] && peerdns="?"
@@ -182,5 +251,9 @@ printf '  },\n'
 printf '  "fakeip_cache_present": %s,\n' "$(b "$fakeip_cache_present")"
 printf '  "skill_state_present": %s,\n' "$(b "$skill_state_present")"
 printf '  "snapshot_count": %s,\n' "$(j_num "$snapshot_count")"
-printf '  "probed_at": %s\n' "$(j_str "$probed_at")"
+printf '  "probed_at": %s,\n' "$(j_str "$probed_at")"
+printf '  "outbounds_detail": %s,\n' "$outbounds_detail_json"
+printf '  "inbounds_detail": %s,\n' "$inbounds_detail_json"
+printf '  "rule_set_domains": %s,\n' "$rule_set_domains_json"
+printf '  "config_proxy_ports": %s\n' "$config_proxy_ports_json"
 printf '}\n'

@@ -11,6 +11,7 @@
 | [`03-add-vpn.md`](./03-add-vpn.md) | Добавление новой VPN-ноды (outbound + auto-failover + zapret nft set) | ✅ |
 | [`04-add-proxy.md`](./04-add-proxy.md) | LAN HTTP/SOCKS5 proxy на mixed-inbound порту 4000-4099 | ✅ |
 | [`05-restore.md`](./05-restore.md) | Откат изменений из snapshot (safety_snapshot + re-sync memory) | ✅ |
+| [`06-adopt-existing.md`](./06-adopt-existing.md) | Адопция уже настроенного роутера (snapshot + probe + render memory, без модификации роутера) | ✅ |
 | [`99-escape-hatch.md`](./99-escape-hatch.md) | Когда и как использовать `bin/raw-ssh.sh` (требует явное «yes») | ✅ |
 
 ## Структура каждого runbook'а

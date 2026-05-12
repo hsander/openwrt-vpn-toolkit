@@ -252,7 +252,12 @@ REMOTE
   - OpenWRT должен быть 24.10+ (apk-based)
   - RAM ≥ 256MB
   - архитектура: aarch64 / x86_64 / x86 / armv7l
-  - если /etc/sing-box/config.json уже есть и НЕ от этого навыка — сначала сделай backup и снеси вручную
+  - если /etc/sing-box/config.json уже есть и НЕ от этого навыка (preflight-fail
+    'existing-sing-box-config-not-owned'): НЕ сноси руками. Запусти
+        bin/adopt.sh --router $ROUTER_ALIAS
+    Он сделает baseline-snapshot и синхронизирует memory с реальным состоянием
+    роутера, не модифицируя сам роутер. После этого install-vpn.sh можно
+    запускать только для расширения (add-vpn/add-domain/add-proxy).
 EOF
     exit 2
   fi

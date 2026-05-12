@@ -41,6 +41,7 @@ _mj_allowed_keys_for() {
     raw_ssh_session_opened)     printf 'reason mutations_allowed ssh_target' ;;
     raw_ssh_session_closed)     printf 'reason mutations_allowed duration_s exit_code ssh_target' ;;
     raw_ssh_session_aborted)    printf 'reason mutations_allowed duration_s exit_code ssh_target' ;;
+    adopted_existing_setup)     printf 'snapshot_before source outbounds_count inbounds_count domains_count config_present rollback_runtime_present' ;;
     # Unknown event kind: empty allowlist => all keys rejected.
     # Agents adding new event kinds MUST register them above.
     *)                          printf '' ;;
