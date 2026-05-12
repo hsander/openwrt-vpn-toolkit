@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openwrt-vpn-kit.dev/schemas/install-state.schema.json",
+  "title": "install-state.json",
+  "description": "Authoritative state of openwrt-vpn-kit installation on a router. Lives at /etc/vpn-kit/install-state.json on the router; client-side cache is advisory. See PROPOSAL.md §9 and §9.3 (CAS).",
+  "type": "object",
+  "required": [
+    "_revision",
+    "_last_writer",
+    "_last_updated_at",
+    "version",
+    "installed_at",
+    "skill_version",
+    "profile",
+    "router_identity",
+    "committed_steps",
+    "components",
+    "files_owned_by_skill"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic revision counter. Incremented by every successful CAS write."
+    },
+    "_last_writer": {
+      "type": "string",
+      "pattern": "^[a-z-]+@[a-zA-Z0-9._-]+$",
+      "description": "Writer ID: <role>@<instance-id>. E.g. claude-code@session-abc123, tg-bot@home-server."
+    },
+    "_last_writer_host": {
+      "type": "string",
+      "description": "Optional: hostname of the machine that made the write."
+    },
+    "_last_updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the last successful write."
+    },
+
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version of install-state.json itself."
+    },
+    "installed_at": {"type": "string", "format": "date-time"},
+    "last_modified_at": {"type": "string", "format": "date-time"},
+    "skill_version": {"type": "string", "description": "SemVer of the skill package that performed the install."},
+    "profile": {"enum": ["minimal", "standard", "advanced"]},
+
+    "router_identity": {
+      "type": "object",
+      "required": ["name", "openwrt_version", "arch"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "openwrt_version": {"type": "string"},
+        "arch": {"enum": ["aarch64", "armv7", "x86_64", "mips", "mipsel"]}
+      }
+    },
+
+    "committed_steps": {
+      "type": "array",
+      "description": "Each staged-apply step that has successfully committed. Daemon checks membership to decide rollback.",
+      "items": {
+        "type": "object",
+        "required": ["step_id", "committed_at", "revision_at_commit"],
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "committed_at": {"type": "string", "format": "date-time"},
+          "revision_at_commit": {"type": "integer", "minimum": 1},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+
+    "components": {
+      "type": "object",
+      "description": "Installed components with versions and integrity info.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "version": {"type": "string"},
+          "init": {"type": "string", "description": "procd init script path, if any."},
+          "binary": {"type": "string"},
+          "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "tarball_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "instances": {"type": "integer", "minimum": 0},
+          "source": {"enum": ["primary", "mirror"]}
+        }
+      }
+    },
+
+    "files_owned_by_skill": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true,
+      "description": "Absolute paths. Uninstall touches only these."
+    },
+
+    "owned_file_checksums": {
+      "type": "object",
+      "description": "Optional sha256 map for files owned by the skill. Used by preflight/session-sync to detect manual intervention.",
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+
+    "uci_changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["config", "section"],
+        "properties": {
+          "config": {"type": "string"},
+          "section": {"type": "string"},
+          "option": {"type": "string"},
+          "prev": {"type": ["string", "null"]},
+          "new": {"type": ["string", "null"]},
+          "name": {"type": "string"},
+          "created": {"type": "boolean"}
+        }
+      }
+    },
+
+    "wireless_additions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["section_name", "type", "created_by_skill"],
+        "properties": {
+          "section_name": {"type": "string"},
+          "type": {"enum": ["wifi-iface", "wifi-device"]},
+          "ssid": {"type": "string"},
+          "created_by_skill": {"type": "boolean"}
+        }
+      }
+    },
+
+    "proxy_ports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["port", "listen", "outbound", "type"],
+        "properties": {
+          "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+          "listen": {"type": "string"},
+          "outbound": {"type": "string"},
+          "type": {"enum": ["mixed", "http", "socks5"]}
+        }
+      }
+    },
+
+    "firewall_rules_added": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string"},
+          "src_zone": {"type": "string"},
+          "src_subnets": {"type": "array", "items": {"type": "string"}},
+          "dest_ports": {"type": "string"},
+          "dest_port": {"type": "integer"},
+          "enabled": {"type": "boolean"},
+          "optional": {"type": "boolean"}
+        }
+      }
+    },
+
+    "cron_entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["schedule", "cmd"],
+        "properties": {
+          "schedule": {"type": "string"},
+          "cmd": {"type": "string"}
+        }
+      }
+    },
+
+    "dynamic_additions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "value", "added_at", "origin", "persisted_in"],
+        "properties": {
+          "id": {"type": "string"},
+          "type": {"enum": ["domain", "subnet", "lan_client", "zapret_host"]},
+          "value": {"type": "string"},
+          "added_at": {"type": "string", "format": "date-time"},
+          "origin": {"enum": ["claude-code", "tg-bot", "routerctl", "manual"]},
+          "persisted_in": {"type": "string"},
+          "config_ref": {"type": "string"},
+          "nft_set": {"type": "string"},
+          "session": {"type": "string"}
+        }
+      }
+    },
+
+    "zapret_hosts": {
+      "type": "object",
+      "properties": {
+        "source_file": {"type": "string"},
+        "managed_entries": {"type": "array", "items": {"type": "string"}},
+        "user_added": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+
+    "secrets_paths_only": {
+      "type": "object",
+      "description": "Paths to files that CONTAIN secrets. NEVER the secret values.",
+      "additionalProperties": {"type": "string"}
+    }
+  }
+}

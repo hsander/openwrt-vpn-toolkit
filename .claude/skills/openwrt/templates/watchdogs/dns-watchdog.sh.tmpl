@@ -1,0 +1,19 @@
+#!/bin/sh
+# openwrt-vpn-kit minimal DNS watchdog placeholder.
+
+LOG=/var/log/dns-watchdog.log
+MAX_BYTES=1048576
+
+rotate_log() {
+  [ -f "$LOG" ] || return 0
+  size="$(wc -c < "$LOG" 2>/dev/null || echo 0)"
+  [ "$size" -gt "$MAX_BYTES" ] || return 0
+  mv "$LOG" "$LOG.1"
+}
+
+rotate_log
+if nslookup openwrt.org 127.0.0.1 >/dev/null 2>&1; then
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) dns ok" >> "$LOG"
+else
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) dns failed" >> "$LOG"
+fi

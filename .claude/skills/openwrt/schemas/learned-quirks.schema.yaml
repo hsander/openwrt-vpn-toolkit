@@ -1,0 +1,85 @@
+# JSON-Schema draft-07 (in YAML) for learned-quirks.yaml.
+# See PROPOSAL.md §9.1 (operational memory) and §9.3 (CAS fields).
+
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "https://openwrt-vpn-kit.dev/schemas/learned-quirks.schema.yaml"
+title: learned-quirks.yaml
+description: Machine-readable observations that influence skill behavior on subsequent runs.
+
+type: object
+required: [_revision, _last_writer, _last_updated_at, version]
+additionalProperties: false
+properties:
+
+  _revision: {type: integer, minimum: 0}
+  _last_writer: {type: string, pattern: '^[a-z-]+@[a-zA-Z0-9._-]+$'}
+  _last_updated_at: {type: string, format: date-time}
+  version: {type: integer, const: 1}
+
+  isp:
+    type: object
+    properties:
+      detected_name: {type: string}
+      detected_at: {type: string, format: date-time}
+      dpi_behavior:
+        type: object
+        properties:
+          blocks_sni:
+            type: array
+            items: {type: string}
+          ip_blocks:
+            type: array
+            items: {type: string}
+          tspu_like: {type: boolean}
+      working_zapret_strategy: {type: string}
+      working_zapret_fooling:
+        type: array
+        items: {type: string}
+      telegram_api_reachable_direct: {type: boolean}
+      telegram_api_working_ip: {type: string}
+
+  hardware:
+    type: object
+    properties:
+      cpu_model: {type: string}
+      wifi_driver: {type: string}
+      known_quirks:
+        type: array
+        items:
+          type: object
+          required: [id, affects, workaround, learned_at]
+          properties:
+            id: {type: string}
+            affects: {type: string}
+            workaround: {type: string}
+            learned_at: {type: string, format: date-time}
+
+  nodes:
+    type: array
+    items:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        observed_issues:
+          type: array
+          items: {type: string}
+        avoid_for:
+          type: array
+          items: {type: string}
+        stability: {enum: [good, flaky, bad, unknown]}
+        recommended_for:
+          type: array
+          items: {type: string}
+        pin_routes:
+          type: array
+          items: {type: string}
+        last_check: {type: string, format: date-time}
+
+  user_preferences:
+    type: object
+    properties:
+      merge_strategy_wifi: {type: string}
+      confirm_every_step: {type: boolean}
+      notification_verbosity:
+        enum: [silent, state_changes_only, all_events]

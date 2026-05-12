@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openwrt-vpn-kit.dev/schemas/event.schema.json",
+  "title": "events.jsonl record",
+  "description": "One line of /etc/vpn-kit/journal/events.jsonl. Append-only; see PROPOSAL.md §9.1.",
+  "type": "object",
+  "required": ["ts", "type"],
+  "additionalProperties": true,
+  "properties": {
+    "ts": {"type": "string", "format": "date-time"},
+    "type": {
+      "enum": [
+        "setup_started",
+        "setup_completed",
+        "setup_failed",
+        "staged_apply_started",
+        "staged_apply_committed",
+        "staged_apply_rolled_back",
+        "dynamic_add",
+        "dynamic_remove",
+        "verify_run",
+        "user_decision",
+        "failure_observed",
+        "manual_intervention_detected",
+        "wifi_change",
+        "node_added",
+        "node_removed",
+        "profile_upgrade",
+        "state_updated",
+        "notes_compressed",
+        "snapshot_cleaned",
+        "snapshot_rolled_back",
+        "emergency_prune",
+        "concurrent_write_conflict_unresolved"
+      ]
+    },
+    "state_revision": {"type": "integer", "minimum": 0, "description": "Revision of install-state.json at the time of the event."},
+    "writer": {"type": "string"},
+    "session": {"type": "string"},
+    "step": {"type": "string"},
+    "step_id": {"type": "string"},
+    "reason": {"type": "string"},
+    "snapshot": {"type": "string"},
+    "triggered_by": {"enum": ["timer", "explicit", "daemon", "user", "watchdog"]},
+    "rollback_timer_elapsed_s": {"type": "integer"},
+    "kind": {"type": "string"},
+    "value": {"type": "string"},
+    "origin": {"type": "string"},
+    "question": {"type": "string"},
+    "choice": {"type": "string"},
+    "asked_by": {"type": "string"}
+  }
+}

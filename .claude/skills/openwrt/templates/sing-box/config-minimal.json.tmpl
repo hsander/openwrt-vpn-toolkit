@@ -1,0 +1,52 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "__CACHE_FILE__",
+      "cache_id": "openwrt-vpn-kit-minimal"
+    }
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "lan-mixed-__NODE_NAME__",
+      "listen": "__LISTEN__",
+      "listen_port": __PORT__
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "__NODE_NAME__",
+      "server": "__SERVER__",
+      "server_port": __SERVER_PORT__,
+      "uuid": "__UUID__",
+      "flow": "__FLOW__",
+      "tls": {
+        "enabled": true,
+        "server_name": "__SNI__",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "__FINGERPRINT__"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "__PUBLIC_KEY__",
+          "short_id": "__SHORT_ID__"
+        }
+      }
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "final": "__NODE_NAME__",
+    "rules": []
+  }
+}

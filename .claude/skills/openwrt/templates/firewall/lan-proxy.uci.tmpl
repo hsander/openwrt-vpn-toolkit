@@ -1,0 +1,7 @@
+# openwrt-vpn-kit minimal LAN proxy rule.
+config rule 'vpn_kit_lan_proxy___PORT__'
+	option name 'vpn-kit LAN proxy __PORT__'
+	option src 'lan'
+	option proto 'tcp'
+	option dest_port '__PORT__'
+	option target 'ACCEPT'

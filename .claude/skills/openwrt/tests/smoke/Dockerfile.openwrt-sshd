@@ -1,0 +1,84 @@
+# tests/smoke/Dockerfile.openwrt-sshd
+#
+# Extends openwrt/rootfs:x86-64 (SNAPSHOT, apk-v3) with sshd + the packages the
+# openwrt-skill bin/*.sh scripts probe / use. The runner (`run-smoke.sh`)
+# bind-injects an authorized_keys via build-arg AUTHKEY at build time.
+#
+# Build with:
+#   docker build \
+#     --platform linux/amd64 \
+#     -f tests/smoke/Dockerfile.openwrt-sshd \
+#     --build-arg AUTHKEY="$(cat tests/smoke/.tmp/smoke_ed25519.pub)" \
+#     -t openwrt-skill-smoke:latest tests/smoke
+#
+# Run with:
+#   docker run -d --rm --name openwrt-skill-smoke -p 127.0.0.1:2222:22 \
+#     openwrt-skill-smoke:latest
+
+FROM openwrt/rootfs:x86-64
+
+# Probed against the image on 2026-05-11:
+#   apk-tools 3.0.5, sing-box-1.12.22, jq-1.8.1, openssh-server-10.3p1,
+#   coreutils-sha256sum-9.9, tar-1.35, curl-8.19, bash-5.3, ca-bundle.
+# All of these are in the openwrt SNAPSHOT feed (packages/x86_64/packages).
+RUN apk update \
+ && apk add \
+      bash \
+      openssh-server \
+      openssh-keygen \
+      jq \
+      tar \
+      coreutils-sha256sum \
+      curl \
+      ca-bundle \
+      sing-box \
+ && rm -rf /var/cache/apk/*
+
+# Host keys (sshd refuses to start without them).
+RUN ssh-keygen -A
+
+# SSH access. We accept the authorized_keys via build-arg so the smoke runner
+# can drop in a freshly generated test-only key without baking it into the
+# Dockerfile / image registry.
+ARG AUTHKEY=""
+RUN mkdir -p /root/.ssh \
+ && chmod 700 /root/.ssh \
+ && if [ -n "$AUTHKEY" ]; then \
+      printf '%s\n' "$AUTHKEY" > /root/.ssh/authorized_keys; \
+    else \
+      echo "WARN: AUTHKEY build-arg empty -- ssh keyauth will fail" >&2; \
+    fi \
+ && chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+
+# Defensive: set a known root password so we have a fallback if key auth fails.
+# We surface this fact on stderr at container start so it can't go unnoticed.
+RUN echo 'root:openwrt-skill-smoke' | chpasswd 2>/dev/null \
+ || ( echo 'root:openwrt-skill-smoke' >> /etc/shadow.broken \
+      && printf 'root:$1$smoke$P9DyEnZxhPpBVZJL.0lUO/:19000:0:99999:7:::\n' >> /etc/shadow )
+
+# Permit root login and key-only auth where possible. sshd default config in
+# OpenWrt is permissive enough but we pin the bits that matter.
+# - /var/empty is the privsep chroot dir; openssh refuses to start without it.
+# - UsePAM is intentionally omitted: this build of openssh on OpenWrt does
+#   NOT compile with PAM, so the directive is "unsupported option" (fatal).
+RUN mkdir -p /etc/ssh /var/empty \
+ && chmod 755 /var/empty \
+ && { echo 'PermitRootLogin yes'; \
+      echo 'PubkeyAuthentication yes'; \
+      echo 'PasswordAuthentication yes'; \
+      echo 'PermitEmptyPasswords no'; \
+      echo 'AcceptEnv LANG LC_*'; \
+      echo 'Subsystem sftp /usr/lib/ssh/sftp-server'; \
+    } > /etc/ssh/sshd_config
+
+# Pre-create /etc/vpn-kit/snapshots (backup-now does mkdir, but pre-creating
+# narrows the surface of "first run with no /etc/vpn-kit") and a fake
+# OpenWrt 24.10-ish release file so the smoke can also exercise the
+# "version is acceptable" branch even though the rootfs reports SNAPSHOT.
+# We leave /etc/openwrt_release untouched -- doctor.sh should still emit JSON
+# even with version="SNAPSHOT", which is itself a useful test of robustness.
+
+EXPOSE 22
+# -D foreground, -e log to stderr so `docker logs` shows ssh activity.
+# We also `echo` the defensive-password warning so it can't be missed.
+CMD ["/bin/sh", "-c", "echo 'openwrt-skill-smoke: defensive root password is openwrt-skill-smoke (use ssh key for tests!)' >&2; exec /usr/sbin/sshd -D -e"]

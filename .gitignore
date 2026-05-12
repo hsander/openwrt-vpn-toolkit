@@ -1,0 +1,31 @@
+# Per-router memory (содержит alias/host — может быть приватным)
+.claude/skills/openwrt/memory/*/
+.claude/skills/openwrt/memory/routers.yaml
+
+# Локальные конфиги/секреты которые могут случайно попасть
+*.pem
+*.key
+*.conf.local
+.env
+.env.local
+
+# Логи запусков и активаций (могут содержать вывод с роутера)
+*.log
+activation-*.log
+tmp/
+.tmp/
+
+# macOS/IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Тестовые артефакты. Smoke/qemu-тесты теперь складывают артефакты в
+# $TMPDIR/openwrt-skill-* (вне skill-дерева). Эти ignore'ы остаются как
+# страховка на случай если кто-то форсирует SMOKE_TMP_DIR/QEMU_TMP_DIR
+# внутрь репо или останутся артефакты от старых запусков.
+/tmp-test/
+/.bats-tmp/
+.claude/skills/openwrt/tests/**/.tmp/

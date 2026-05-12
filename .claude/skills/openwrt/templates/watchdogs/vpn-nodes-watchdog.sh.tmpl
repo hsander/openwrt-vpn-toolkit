@@ -1,0 +1,11 @@
+#!/bin/sh
+# openwrt-vpn-kit minimal VPN node watchdog placeholder.
+
+LOG=/var/log/vpn-nodes-watchdog.log
+PORT=__PORT__
+
+if netstat -tln 2>/dev/null | grep -q ":$PORT "; then
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) proxy :$PORT listening" >> "$LOG"
+else
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) proxy :$PORT not listening" >> "$LOG"
+fi

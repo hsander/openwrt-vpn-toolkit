@@ -1,0 +1,4 @@
+v72.12:
+  source: https://github.com/bol-van/zapret/releases/tag/v72.12
+  sha256: "<fill-before-production-install>"
+  mode: hostlist

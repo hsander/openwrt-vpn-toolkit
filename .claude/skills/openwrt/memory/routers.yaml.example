@@ -1,0 +1,26 @@
+# memory/routers.yaml — реестр роутеров, которыми управляет навык
+# Скопируй в routers.yaml (без .example) и заполни. Файл НЕ кладётся в публичный git.
+#
+# Никаких секретов: только хост, юзер, путь к ключу, alias.
+# UUID/токены/пароли — на роутере, в /etc/sing-box/config.json и /etc/router-watchdog.conf
+
+version: 1
+
+routers:
+  # Пример. Удали и добавь свои.
+  home:
+    host: 192.168.1.1          # IP или DNS-имя
+    user: root                 # обычно root для OpenWRT
+    ssh_key: ~/.ssh/openwrt_home_ed25519   # путь к private key
+    ssh_alias: openwrt-home    # как назван Host в ~/.ssh/config
+    notes: "Главный домашний роутер. Xiaomi AX3000T, OpenWRT 24.10."
+
+  # office:
+  #   host: 10.0.0.1
+  #   user: root
+  #   ssh_key: ~/.ssh/openwrt_office_ed25519
+  #   ssh_alias: openwrt-office
+  #   notes: "Офисный VPN-роутер. Failover на mobile при отказе провайдера."
+
+# Дефолтный роутер: если в команде не указан --router, использовать этот alias.
+# default_router: home
