@@ -149,6 +149,32 @@ if ! printf '%s' "$probe_json" | jq -e . >/dev/null 2>&1; then
   exit 2
 fi
 
+# Hard guard: при degraded probe (jq-missing-on-router / config-json-unparseable)
+# поля outbounds_detail/inbounds_detail/rule_set_domains в probe = [] не потому
+# что их РЕАЛЬНО нет, а потому что мы не смогли распарсить config.json. Записать
+# memory из такого probe — значит подсунуть агенту ложную картину (это и
+# случалось до этого фикса). Лучше отказаться явно, чем создать silent failure.
+probe_reliable_raw="$(printf '%s' "$probe_json" | jq -r 'if has("probe_reliable") then (.probe_reliable | tostring) else "true" end' 2>/dev/null)"
+if [ "$probe_reliable_raw" = "false" ]; then
+  degraded_list="$(printf '%s' "$probe_json" | jq -r '(.degraded_reasons // []) | join(", ")' 2>/dev/null)"
+  cat >&2 <<EOF
+adopt: ОТКАЗ — probe degraded ($degraded_list).
+
+При degraded probe скрипт не может надёжно прочитать /etc/sing-box/config.json,
+и память (vpns.md/domains.md/proxies.md) будет ложной — это уже ломало нас
+раньше. Чтобы пройти дальше:
+
+  1. Установи jq на роутер:
+       ssh $ROUTER_ALIAS 'apk add jq || (opkg update && opkg install jq)'
+  2. Перезапусти adopt:
+       bin/adopt.sh --router $ROUTER_ALIAS
+
+state.md уже отрендерен через doctor.sh (помечен ⚠), но vpns/domains/proxies
+оставлены нетронутыми до того, как probe станет надёжным.
+EOF
+  exit 2
+fi
+
 # Render state.md через doctor.sh (без --no-render). doctor.sh снова дёрнет
 # probe — это лишний раунд по ssh, но даёт нам бесплатно rich state.md без
 # дублирования кода. Альтернатива — экспортировать render-логику в lib/.

@@ -23,6 +23,10 @@ description: Безопасная настройка и обслуживание
 5. **Memory обновляется ТОЛЬКО после успешного exit 0** скрипта. Скрипты делают это сами через `lib/notes-write.sh` и `lib/journal-append.sh`.
 6. **Не модифицируй `bin/_lib/` и `lib/`.** Это контракт. Если нужна новая операция — новый скрипт в `bin/`.
 7. **Не редактируй файлы на роутере напрямую** (через ssh + редактор). Только через скрипты, которые делают atomic write + validate + rollback.
+8. **Доверяй doctor probe только при `probe_reliable=true`.** В отчёте `state.md` поля `outbound_count`, `outbounds_detail`, `rule_set_domains` зависят от наличия `jq` на роутере и парсабельности `/etc/sing-box/config.json`. Если `probe_reliable=false` (jq отсутствует, config битый):
+   - Строки чек-листа 11 и 14 показываются как `⚠` с пояснением, **не как `✗`**. Не утверждай пользователю «у тебя нет VPN/outbound'ов» — ты этого не знаешь.
+   - `adopt.sh` **откажется работать** (exit 2) — иначе он рендерит ложную `vpns.md`/`domains.md`/`proxies.md`. Сначала установи jq: `ssh <alias> 'apk add jq || (opkg update && opkg install jq)'`, затем повтори.
+   - Реальный инцидент, из которого это правило выросло: на чужом роутере без jq doctor выдал `outbound_count: 0`, adopt записал «пустую» память, а в действительности там было 6 mixed-inbound прокси и работающий VLESS-outbound.
 
 ## Структура
 

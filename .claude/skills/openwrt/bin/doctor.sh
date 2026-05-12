@@ -98,10 +98,10 @@ get() { printf '%s' "$probe_json" | jq -r "$1"; }
 
 # Probe reliability — если jq нет на роутере (или config битый), весь блок
 # полей, который требует парсинга JSON (outbounds/rule_set), НЕДОСТОВЕРЕН.
-# Старые версии _doctor_remote.sh могут не эмитить эти поля; в таком случае
-# fallback на reliable=true и пустой список причин — это безопасный дефолт
-# (мы просто не хуже, чем было).
-probe_reliable="$(printf '%s' "$probe_json" | jq -r '.probe_reliable // true' 2>/dev/null)"
+# ВНИМАНИЕ к ловушке jq: `// true` ВЕРНЁТ true для false (alternative-оператор
+# срабатывает на null OR false). Используем явный if/has для backward-compat
+# со старыми probe-JSON, где поля могло не быть.
+probe_reliable="$(printf '%s' "$probe_json" | jq -r 'if has("probe_reliable") then (.probe_reliable | tostring) else "true" end' 2>/dev/null)"
 degraded_reasons="$(printf '%s' "$probe_json" | jq -r '(.degraded_reasons // []) | join(", ")' 2>/dev/null)"
 
 openwrt_version="$(get '.openwrt_version')"
@@ -320,6 +320,15 @@ else
   ready_for_ops="нет, не хватает:$not_ready"
 fi
 
+# Degraded-probe баннер: если jq нет на роутере / config не парсится, поля
+# outbounds/rule_set в probe недостоверны. Это надо показать ВЫШЕ обычного
+# резюме, чтобы агент/пользователь не делал выводов из неполной картины.
+if [ "$probe_reliable" = "false" ]; then
+  degraded_banner="⚠ **Probe degraded:** $degraded_reasons. Поля \`outbound_count\`, \`outbounds_detail\`, \`rule_set_domains\` могут быть **не достоверны**. Не запускай \`adopt.sh\` и не делай выводов «у меня нет VPN» — сначала установи недостающее (для jq: \`ssh $ROUTER_ALIAS 'apk add jq || opkg update && opkg install jq'\`) и перезапусти doctor."
+else
+  degraded_banner=""
+fi
+
 missing_safety=""
 [ "$skill_state_ok" = "$FAIL" ] && missing_safety="$missing_safety skill-state"
 [ "$first_snapshot_ok" = "$FAIL" ] && missing_safety="$missing_safety snapshots"
@@ -328,13 +337,19 @@ missing_safety=""
 
 # Next steps suggestion
 next_steps=""
+if [ "$probe_reliable" = "false" ]; then
+  # Сначала чиним probe — иначе любые суждения о состоянии будут ложными.
+  next_steps="${next_steps}- ⚠ \`ssh $ROUTER_ALIAS 'apk add jq || (opkg update && opkg install jq)'\` — поставить \`jq\` на роутер; затем \`bin/doctor.sh --router $ROUTER_ALIAS\` ещё раз. Без этого probe degraded, и состояние outbounds/rule_set не достоверно.\n"
+fi
 if [ "$ssh_alias_ok" = "$FAIL" ]; then
   next_steps="${next_steps}- \`bin/setup-ssh.sh --router $ROUTER_ALIAS\` — поставить ssh ключ и alias\n"
 fi
 if [ "$watchdog_conf_ok" = "$FAIL" ]; then
   next_steps="${next_steps}- \`bin/setup-watchdog.sh --router $ROUTER_ALIAS\` — настроить Telegram-watchdog\n"
 fi
-if [ "$singbox_config_ok" = "$FAIL" ] || [ "$vpn_outbound_ok" = "$FAIL" ]; then
+# install-vpn.sh имеет смысл предлагать ТОЛЬКО когда мы реально знаем, что
+# VPN-outbound отсутствует (probe надёжен). При degraded probe не лезем.
+if [ "$probe_reliable" = "true" ] && { [ "$singbox_config_ok" = "$FAIL" ] || [ "$vpn_outbound_ok" = "$FAIL" ]; }; then
   next_steps="${next_steps}- \`bin/install-vpn.sh --router $ROUTER_ALIAS --url 'vless://...'\` — поднять sing-box + VPN с нуля\n"
 fi
 if [ "$zapret_ok" = "$FAIL" ] && [ "$zapret_installed" = "false" ]; then
@@ -386,6 +401,8 @@ revision: 0
 | 18 | FakeIP cache \`cache.db\` | $fakeip_cache_ok | $fakeip_cache_details |
 | 19 | \`/etc/vpn-kit/install-state.json\` | $skill_state_ok | $skill_state_details |
 | 20 | Snapshots существуют | $first_snapshot_ok | $first_snapshot_details |
+
+$( [ -n "$degraded_banner" ] && printf '> %s\n' "$degraded_banner" )
 
 ## Резюме
 
