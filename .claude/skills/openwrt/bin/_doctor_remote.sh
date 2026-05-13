@@ -152,6 +152,11 @@ outbounds_detail_json='[]'
 inbounds_detail_json='[]'
 rule_set_domains_json='[]'
 config_proxy_ports_json='[]'
+# v2 fields (additive): selector/urltest groups, inbound→outbound and domain→outbound maps.
+# Same secret hygiene: only tags, types, domains, rule indices. No server/uuid/keys.
+selector_groups_json='[]'
+inbound_outbound_map_json='[]'
+domain_outbound_map_json='[]'
 
 if [ "$config_jq_parseable" = "1" ]; then
   # outbounds_detail: keep ONLY tag/type/server/server_port.
@@ -208,6 +213,77 @@ if [ "$config_jq_parseable" = "1" ]; then
     ] | flatten | unique
   ' /etc/sing-box/config.json 2>/dev/null)"
   [ -n "$_rd" ] && rule_set_domains_json="$_rd"
+
+  # selector_groups: selector/urltest outbounds with their member list + failover knobs.
+  # `default` falls back to first member when not set. No server addresses leaked.
+  _sg="$(jq -c '
+    [
+      (.outbounds // [])[]
+      | select(type == "object")
+      | select(.type == "selector" or .type == "urltest")
+      | {
+          tag:                ((.tag // "") | tostring),
+          type:               (.type | tostring),
+          default:            (.default // ((.outbounds // [])[0] // null)),
+          outbounds:          (.outbounds // []),
+          failover_url:       (if .type == "urltest" then (.url // null)       else null end),
+          failover_interval:  (if .type == "urltest" then (.interval // null)  else null end),
+          failover_tolerance: (if .type == "urltest" then (.tolerance // null) else null end)
+        }
+    ]
+  ' /etc/sing-box/config.json 2>/dev/null)"
+  [ -n "$_sg" ] && [ "$_sg" != "null" ] && selector_groups_json="$_sg"
+
+  # inbound_outbound_map: every (rule.inbound[i] -> rule.outbound) pair,
+  # with fallback to .route.final when rule has no explicit outbound.
+  # via_rule_index is the index into .route.rules (stable ordering).
+  _iom="$(jq -c '
+    . as $cfg
+    | ($cfg.route.final // null) as $fallback
+    | [
+        ($cfg.route.rules // []) | to_entries[]
+        | .key as $i
+        | .value
+        | select(type == "object")
+        | select(((.inbound // []) | type) == "array")
+        | select(((.inbound // []) | length) > 0)
+        | (.outbound // $fallback) as $ob
+        | (.inbound[])
+        | select(type == "string")
+        | {inbound_tag: ., outbound_tag: $ob, via_rule_index: $i}
+      ]
+  ' /etc/sing-box/config.json 2>/dev/null)"
+  [ -n "$_iom" ] && [ "$_iom" != "null" ] && inbound_outbound_map_json="$_iom"
+
+  # domain_outbound_map: flatten domain / domain_suffix / domain_keyword / domain_regex
+  # from .route.rules[] into (domain, match_type, outbound_tag, via_rule_index) tuples.
+  # rule_set[]-level domains are intentionally skipped (would need file reads).
+  _dom="$(jq -c '
+    . as $cfg
+    | ($cfg.route.final // null) as $fallback
+    | [
+        ($cfg.route.rules // []) | to_entries[]
+        | .key as $i
+        | .value
+        | select(type == "object")
+        | (.outbound // $fallback) as $ob
+        | (
+            ( (.domain         // []) | (if type == "array" then . else [.] end)
+              | .[] | select(type == "string")
+              | {domain: ., match_type: "domain",         outbound_tag: $ob, via_rule_index: $i} ),
+            ( (.domain_suffix  // []) | (if type == "array" then . else [.] end)
+              | .[] | select(type == "string")
+              | {domain: ., match_type: "domain_suffix",  outbound_tag: $ob, via_rule_index: $i} ),
+            ( (.domain_keyword // []) | (if type == "array" then . else [.] end)
+              | .[] | select(type == "string")
+              | {domain: ., match_type: "domain_keyword", outbound_tag: $ob, via_rule_index: $i} ),
+            ( (.domain_regex   // []) | (if type == "array" then . else [.] end)
+              | .[] | select(type == "string")
+              | {domain: ., match_type: "domain_regex",   outbound_tag: $ob, via_rule_index: $i} )
+          )
+      ]
+  ' /etc/sing-box/config.json 2>/dev/null)"
+  [ -n "$_dom" ] && [ "$_dom" != "null" ] && domain_outbound_map_json="$_dom"
 fi
 
 # DNS chain
@@ -303,5 +379,9 @@ printf '  "degraded_reasons": [%s],\n' "$degraded_reasons"
 printf '  "outbounds_detail": %s,\n' "$outbounds_detail_json"
 printf '  "inbounds_detail": %s,\n' "$inbounds_detail_json"
 printf '  "rule_set_domains": %s,\n' "$rule_set_domains_json"
-printf '  "config_proxy_ports": %s\n' "$config_proxy_ports_json"
+printf '  "config_proxy_ports": %s,\n' "$config_proxy_ports_json"
+printf '  "probe_schema_version": 2,\n'
+printf '  "selector_groups": %s,\n' "$selector_groups_json"
+printf '  "inbound_outbound_map": %s,\n' "$inbound_outbound_map_json"
+printf '  "domain_outbound_map": %s\n' "$domain_outbound_map_json"
 printf '}\n'

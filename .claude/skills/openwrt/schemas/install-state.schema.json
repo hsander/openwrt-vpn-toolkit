@@ -116,6 +116,12 @@
       "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
     },
 
+    "adopted_config_sha256": {
+      "type": "object",
+      "description": "Set by adopt.sh: sha256 of pre-existing user files at the moment of adoption. Used by add-vpn/add-ip/pin-device drift-detection to refuse mutation if the user edited config out-of-band. Keys are absolute paths; values are sha256 or null if the file was absent at adopt time.",
+      "additionalProperties": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+    },
+
     "uci_changes": {
       "type": "array",
       "items": {

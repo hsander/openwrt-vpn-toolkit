@@ -51,17 +51,19 @@ ssh_run_remote() {
 
 # scp_to — copy a local file to the router.
 # Usage: scp_to <local-path> <remote-path>
+# -O forces legacy SCP protocol so we don't depend on openssh-sftp-server
+# being installed on the router (minimal OpenWRT builds ship sshd without it).
 scp_to() {
   local src="$1" dst="$2"
   # shellcheck disable=SC2046,SC2086
-  scp $(_ssh_key_arg) $(_ssh_common_opts | xargs) -o ConnectTimeout=15 "$src" "$(_ssh_target):$dst"
+  scp -O $(_ssh_key_arg) $(_ssh_common_opts | xargs) -o ConnectTimeout=15 "$src" "$(_ssh_target):$dst"
 }
 
 # scp_from — copy a remote file to local.
 scp_from() {
   local src="$1" dst="$2"
   # shellcheck disable=SC2046,SC2086
-  scp $(_ssh_key_arg) $(_ssh_common_opts | xargs) -o ConnectTimeout=15 "$(_ssh_target):$src" "$dst"
+  scp -O $(_ssh_key_arg) $(_ssh_common_opts | xargs) -o ConnectTimeout=15 "$(_ssh_target):$src" "$dst"
 }
 
 # ssh_run_remote_with_args — pipe a script via stdin AND supply positional args.

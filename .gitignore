@@ -1,6 +1,7 @@
 # Per-router memory (содержит alias/host — может быть приватным)
 .claude/skills/openwrt/memory/*/
 .claude/skills/openwrt/memory/routers.yaml
+.omc
 
 # Локальные конфиги/секреты которые могут случайно попасть
 *.pem
