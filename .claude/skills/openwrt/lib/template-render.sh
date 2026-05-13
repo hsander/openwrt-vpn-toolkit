@@ -57,8 +57,9 @@ render_first_time_memory() {
 
   mkdir -p "$out_dir"
 
-  for name in domains.md vpns.md proxies.md quirks.md journal.md; do
+  for name in domains.md vpns.md proxies.md subnets.md pins.md quirks.md journal.md; do
     [ -f "$out_dir/$name" ] && continue
+    [ -f "$tpl_dir/$name" ] || continue
 
     render_template "$tpl_dir/$name" "$out_dir/$name" \
       "ROUTER_ALIAS=$alias" \
@@ -68,6 +69,8 @@ render_first_time_memory() {
       "DOMAIN_TABLE_ROWS=_(пока пусто — добавь через bin/add-domain.sh)_" \
       "VPN_TABLE_ROWS=_(пока пусто — добавь через bin/add-vpn.sh)_" \
       "PROXY_TABLE_ROWS=_(пока пусто — добавь через bin/add-proxy.sh)_" \
+      "SUBNET_TABLE_ROWS=_(пока пусто — добавь через bin/add-ip.sh)_" \
+      "PIN_TABLE_ROWS=_(пока пусто — добавь через bin/pin-device.sh)_" \
       "QUIRK_ENTRIES=_(никаких особенностей не записано)_" \
       "JOURNAL_ENTRIES=_(пусто)_" \
       "NOTES=" \

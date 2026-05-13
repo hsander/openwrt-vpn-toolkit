@@ -34,6 +34,8 @@ _mj_allowed_keys_for() {
     remove_vpn)                 printf 'tag snapshot_before removed_proxy_ports' ;;
     add_domain)                 printf 'domain outbound snapshot_before' ;;
     remove_domain)              printf 'domain snapshot_before' ;;
+    add_ip)                     printf 'ip family via nft_set snapshot_before revision drift_overridden' ;;
+    pin_device)                 printf 'source_ip outbound snapshot_before pin_id tproxy_port revision' ;;
     add_proxy)                  printf 'port outbound listen snapshot_before' ;;
     remove_proxy)               printf 'port snapshot_before' ;;
     snapshot_created)           printf 'snapshot_id label sha256 size_bytes' ;;
