@@ -359,6 +359,31 @@ if [ -z "$next_steps" ]; then
   next_steps="Всё базовое настроено. Можно начинать работу: \`bin/add-domain.sh\`, \`bin/add-vpn.sh\` и т.д."
 fi
 
+# Count active subnets / pins from local memory MD files. Source of truth для
+# обоих файлов — install-state.dynamic_additions[] на роутере, но проще
+# посчитать строки таблицы локально, т.к. add-ip.sh / pin-device.sh уже
+# рендерят их после CAS-write. Если файла нет (новый роутер до adopt) —
+# показываем "—". Считаем только data-rows: исключаем header, separator
+# (`|----` / `|:----`) и плейсхолдер `_(пока пусто …)_`.
+count_md_table_rows() {
+  local md="$1"
+  [ -f "$md" ] || { echo "—"; return 0; }
+  awk '
+    BEGIN { n = 0 }
+    /^\|[[:space:]]*-+/ { next }       # separator |---|---|
+    /^\|[[:space:]]*:?-+/ { next }     # separator |:---|
+    /^\| *IP \/ CIDR / { next }        # subnets header
+    /^\| *Source +\| *Scope / { next } # pins header
+    /^\| *#? *Header/ { next }
+    /^\|.*\(пока пусто/ { next }       # placeholder row
+    /^\|/ { n++ }
+    END { print n }
+  ' "$md"
+}
+
+subnets_count="$(count_md_table_rows "$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/subnets.md")"
+pins_count="$(count_md_table_rows "$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/pins.md")"
+
 # Build table rows (markdown). Each row: | # | Component | Icon | Details |
 state_out="$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/state.md"
 
@@ -404,6 +429,22 @@ revision: 0
 
 $( [ -n "$degraded_banner" ] && printf '> %s\n' "$degraded_banner" )
 
+## Subnets via VPN
+
+Маршрутизируемые IP/CIDR (nft-сет \`proxy_subnets\` + \`dynamic_additions[].type=="subnet"\`).
+
+- **Активных записей:** $subnets_count
+- Источник: [\`subnets.md\`](./subnets.md)
+- Управление: \`bin/add-ip.sh\` (V1: \`--via auto\`, IPv4; \`remove-ip.sh\` TBD)
+
+## Pinned LAN clients
+
+Прибитые к конкретному outbound LAN-устройства (\`route.rules[].source_ip_cidr\` + nft tproxy с маркером \`vpn-kit-pin-*\`).
+
+- **Активных pin'ов:** $pins_count
+- Источник: [\`pins.md\`](./pins.md)
+- Управление: \`bin/pin-device.sh\` (\`unpin-device.sh\` TBD — откат через \`raw-ssh.sh\` или \`restore.sh\`)
+
 ## Резюме
 
 - **Готово к работе:** $ready_for_ops
@@ -418,6 +459,8 @@ $(printf '%b' "$next_steps")
 - VPN ноды: [\`vpns.md\`](./vpns.md)
 - Маршрутизируемые домены: [\`domains.md\`](./domains.md)
 - Проксирующие порты: [\`proxies.md\`](./proxies.md)
+- Подсети через VPN: [\`subnets.md\`](./subnets.md)
+- Pin'ы LAN-клиентов: [\`pins.md\`](./pins.md)
 - История изменений: [\`journal.md\`](./journal.md)
 - Выученные нюансы: [\`quirks.md\`](./quirks.md)
 

@@ -43,8 +43,8 @@ bin/                   # ← safe API. Каждый скрипт — атома�
   remove-vpn.sh
   add-proxy.sh         # mixed-inbound :400X + route rule
   remove-proxy.sh
-  add-ip.sh            # STUB (V1.1) — выдаёт инструкцию по escape hatch
-  pin-device.sh        # STUB (V1.1) — выдаёт инструкцию по escape hatch
+  add-ip.sh            # add IP/CIDR в proxy_subnets nft-set (общий, через --via auto). Per-tag pin TBD.
+  pin-device.sh        # pin LAN-устройства/CIDR на конкретный outbound (route.rules + nft tproxy).
   backup-now.sh        # snapshot of /etc/sing-box, init.d/*, /etc/config, watchdogs
   snapshot-list.sh
   restore.sh           # staged-apply из snapshot
@@ -99,12 +99,16 @@ openwrt/               # файлы, которые ставятся НА роу
 - VLESS Reality outbounds (только эта схема URL).
 - `add-domain` ТОЛЬКО с `--outbound auto-failover` (per-tag pinning отложен в V1.1).
 - LAN proxy на mixed-inbound портах 4000-4099.
+- `add-ip.sh` — IPv4-адреса/CIDR в общий nft-сет `proxy_subnets` (`--via auto`, без per-tag pin).
+- `pin-device.sh` — pin LAN-устройства (source-ip/CIDR) на конкретный outbound через `route.rules` + nft tproxy.
 - Telegram-watchdog, snapshot/restore, raw-ssh escape hatch.
 
 **НЕ поддержано в V1** — если пользователь просит, агент должен прямо отказаться и сослаться на эту секцию:
 - AmneziaWG / WireGuard outbounds (`awg://`, `.conf`-файлы) — нет рендеринга в sing-box config.
 - vmess/trojan/shadowsocks — парсер только под `vless://`.
-- `add-ip.sh` и `pin-device.sh` — stubs, выдают инструкцию по escape hatch.
+- IPv6 для `add-ip.sh` — TBD (V1 поддерживает только IPv4).
+- Per-tag pinning для `add-ip.sh` (`--via <tag>`) — TBD; работает только `--via auto`.
+- `remove-ip.sh` / `unpin-device.sh` — TBD; откат — через `bin/raw-ssh.sh` либо `bin/restore.sh --snapshot <id>`.
 - Multi-router fleet операции (всё всегда per-`--router`).
 - Реконсиляция `domains.md`/`vpns.md`/`proxies.md` после `restore` или после `raw-ssh` — память остаётся «stale-with-warning».
 - Geo-листы доменов (RU/CN/etc) — `add-domain` принимает только одиночные домены.
@@ -203,6 +207,9 @@ bin/raw-ssh.sh --router <alias>
 - `03-add-vpn.md` — добавление новой VPN-ноды
 - `04-add-proxy.md` — пробрасывание mixed-inbound proxy на LAN
 - `05-restore.md` — откат изменений
+- `06-adopt-existing.md` — адоптировать ранее настроенный роутер
+- `07-add-ip.md` — завернуть IP/CIDR в VPN (proxy_subnets nft-set)
+- `08-pin-device.md` — pin LAN-устройства на конкретный outbound
 - `99-escape-hatch.md` — когда и как использовать `raw-ssh.sh`
 
 ## References (для архитектурного контекста)

@@ -12,6 +12,8 @@
 | [`04-add-proxy.md`](./04-add-proxy.md) | LAN HTTP/SOCKS5 proxy на mixed-inbound порту 4000-4099 | ✅ |
 | [`05-restore.md`](./05-restore.md) | Откат изменений из snapshot (safety_snapshot + re-sync memory) | ✅ |
 | [`06-adopt-existing.md`](./06-adopt-existing.md) | Адопция уже настроенного роутера (snapshot + probe + render memory, без модификации роутера) | ✅ |
+| [`07-add-ip.md`](./07-add-ip.md) | Завернуть IP/CIDR в VPN (proxy_subnets nft-set, общий маршрут через `--via auto`) | ✅ |
+| [`08-pin-device.md`](./08-pin-device.md) | Pin LAN-устройства (source-ip/CIDR) на конкретный outbound (route.rules + nft tproxy) | ✅ |
 | [`99-escape-hatch.md`](./99-escape-hatch.md) | Когда и как использовать `bin/raw-ssh.sh` (требует явное «yes») | ✅ |
 
 ## Структура каждого runbook'а
