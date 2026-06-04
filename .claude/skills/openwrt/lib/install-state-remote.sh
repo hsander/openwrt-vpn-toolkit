@@ -33,6 +33,37 @@ _VPN_KIT_INSTALL_STATE_REMOTE_LOADED=1
 : "${VPN_KIT_REMOTE_TMP_DIR:=/tmp}"
 : "${VPN_KIT_CAS_MAX_RETRIES:=3}"
 
+# ensure_router_lib_deployed — проверяет что state-read.sh и state-write.sh
+# присутствуют на роутере в $VPN_KIT_REMOTE_LIB_DIR. Если нет — деплоит их
+# через tar stdin (не требует sftp/scp — работает на минимальных OpenWrt сборках).
+# Вызывать перед первым remote_read_revision / remote_cas_write.
+ensure_router_lib_deployed() {
+  if ssh_run "test -x '$VPN_KIT_REMOTE_LIB_DIR/state-read.sh'" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Resolve SKILL_HOME: this lib is sourced from bin/*.sh which sets SKILL_HOME.
+  local skill_home="${OPENWRT_SKILL_HOME:-}"
+  if [ -z "$skill_home" ]; then
+    echo "ensure_router_lib_deployed: OPENWRT_SKILL_HOME не установлен" >&2
+    return 1
+  fi
+
+  local lib_dir="$skill_home/lib"
+  if [ ! -d "$lib_dir" ]; then
+    echo "ensure_router_lib_deployed: lib/ не найден: $lib_dir" >&2
+    return 1
+  fi
+
+  # Deploy all lib/*.sh files via tar over stdin — works without sftp.
+  if ! tar -cz -C "$lib_dir" -f - $(ls "$lib_dir"/*.sh 2>/dev/null | xargs -n1 basename) \
+       | ssh_run "mkdir -p '$VPN_KIT_REMOTE_LIB_DIR' && tar -xz -C '$VPN_KIT_REMOTE_LIB_DIR' && chmod 0755 '$VPN_KIT_REMOTE_LIB_DIR'/*.sh" >/dev/null 2>&1; then
+    echo "ensure_router_lib_deployed: деплой lib/*.sh на роутер упал" >&2
+    return 1
+  fi
+  return 0
+}
+
 # remote_read_revision <alias-unused-kept-for-symmetry>
 # Echoes current on-router revision (0 if file missing). rc=0 on success,
 # rc=13 if remote file exists but is malformed JSON.

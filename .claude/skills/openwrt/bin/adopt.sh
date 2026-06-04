@@ -131,6 +131,13 @@ EOF
   exit 2
 fi
 
+# Деплоим lib/*.sh на роутер если их там ещё нет (необходимо для CAS через
+# state-read.sh / state-write.sh; OpenWrt minimal builds не имеют sftp).
+if ! ensure_router_lib_deployed; then
+  echo "adopt: не смог задеплоить lib/*.sh на роутер — CAS недоступен." >&2
+  exit 2
+fi
+
 # Гарантируем существование memory/<alias>/ с базовыми шаблонами
 # (render_first_time_memory скипает существующие — мы потом перерендерим
 # vpns/domains/proxies из probe явно через render_template).
@@ -325,7 +332,7 @@ else
   # Read current revision; 0 means file is absent → initial write.
   existing_rev=""
   if ! existing_rev="$(remote_read_revision)"; then
-    echo "adopt: не смог прочитать install-state revision с роутера (state-read.sh rc=$?)." >&2
+    echo "adopt: не смог прочитать install-state revision с роутера (state-read.sh вернул ненулевой код). Проверь: lib/*.sh задеплоены на роутер?" >&2
     exit 13
   fi
 

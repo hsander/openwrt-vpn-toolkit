@@ -157,6 +157,11 @@ config_proxy_ports_json='[]'
 selector_groups_json='[]'
 inbound_outbound_map_json='[]'
 domain_outbound_map_json='[]'
+# v3 fields: local rule_set file contents and rule_set→outbound route mapping.
+# Same secret hygiene: only rule-set names, filenames, domains, match type and outbound tags.
+rule_set_file_domains_json='[]'
+rule_set_outbound_map_json='[]'
+rule_set_file_tag_map_json='[]'
 
 if [ "$config_jq_parseable" = "1" ]; then
   # outbounds_detail: keep ONLY tag/type/server/server_port.
@@ -255,9 +260,88 @@ if [ "$config_jq_parseable" = "1" ]; then
   ' /etc/sing-box/config.json 2>/dev/null)"
   [ -n "$_iom" ] && [ "$_iom" != "null" ] && inbound_outbound_map_json="$_iom"
 
+  # rule_set_outbound_map: every route.rules[] reference to a rule_set tag,
+  # mapped to the rule outbound. This lets doctor resolve external rule-set
+  # files like /etc/sing-box/rules/polsha-only-domains.json -> outbound polsha.
+  _rsom="$(jq -c '
+    . as $cfg
+    | ($cfg.route.final // null) as $fallback
+    | [
+        ($cfg.route.rules // []) | to_entries[]
+        | .key as $i
+        | .value
+        | select(type == "object")
+        | (.outbound // $fallback) as $ob
+        | (
+            (.rule_set // [])
+            | if type == "array" then . else [.] end
+            | .[] | select(type == "string")
+            | {rule_set: ., outbound_tag: $ob, via_rule_index: $i}
+          )
+      ]
+  ' /etc/sing-box/config.json 2>/dev/null)"
+  [ -n "$_rsom" ] && [ "$_rsom" != "null" ] && rule_set_outbound_map_json="$_rsom"
+
+  # rule_set_file_tag_map: route.rule_set definitions bind tags to local files.
+  # Use this instead of guessing tags from filenames: e.g. tag "polsha-only"
+  # points to file "polsha-only-domains.json".
+  _rsftm="$(jq -c '
+    [
+      (.route.rule_set // [])[]
+      | select(type == "object")
+      | select(.tag != null and .tag != "")
+      | select(.path != null and .path != "")
+      | {
+          tag: (.tag | tostring),
+          file: ((.path | tostring) | split("/")[-1])
+        }
+    ]
+  ' /etc/sing-box/config.json 2>/dev/null)"
+  [ -n "$_rsftm" ] && [ "$_rsftm" != "null" ] && rule_set_file_tag_map_json="$_rsftm"
+
+  # rule_set_file_domains: read local rule-set files from /etc/sing-box/rules.
+  # Files can contain sing-box JSONC-style comment-only lines, so strip those
+  # before jq. Only public domain matcher values are emitted.
+  _rsfd='[]'
+  if [ -d /etc/sing-box/rules ]; then
+    for _rf in /etc/sing-box/rules/*.json; do
+      [ -f "$_rf" ] || continue
+      _rf_base="${_rf##*/}"
+      _rs_tag="$(printf '%s' "$rule_set_file_tag_map_json" | jq -r --arg file "$_rf_base" '
+        (map(select(.file == $file))[0].tag // "")
+      ' 2>/dev/null)"
+      [ -n "$_rs_tag" ] || _rs_tag="${_rf_base%.json}"
+      _one="$(
+        sed '/^[[:space:]]*\/\//d' "$_rf" 2>/dev/null | jq -c \
+          --arg rule_set "$_rs_tag" \
+          --arg file "$_rf_base" \
+          '
+            def vals(x):
+              if x == null then []
+              elif (x | type) == "string" then [x]
+              elif (x | type) == "array" then [ x[] | select(type == "string") ]
+              else [] end;
+            [
+              (.rules // [])[]?
+              | (
+                  ( vals(.domain)         | .[] | {domain: ., match_type: "domain"} ),
+                  ( vals(.domain_suffix)  | .[] | {domain: ., match_type: "domain_suffix"} ),
+                  ( vals(.domain_keyword) | .[] | {domain: ., match_type: "domain_keyword"} ),
+                  ( vals(.domain_regex)   | .[] | {domain: ., match_type: "domain_regex"} )
+                )
+              | . + {rule_set: $rule_set, file: $file}
+            ]
+          ' 2>/dev/null
+      )"
+      [ -n "$_one" ] && [ "$_one" != "null" ] || continue
+      _merged="$(jq -cn --argjson a "$_rsfd" --argjson b "$_one" '$a + $b' 2>/dev/null)"
+      [ -n "$_merged" ] && _rsfd="$_merged"
+    done
+  fi
+  rule_set_file_domains_json="$_rsfd"
+
   # domain_outbound_map: flatten domain / domain_suffix / domain_keyword / domain_regex
-  # from .route.rules[] into (domain, match_type, outbound_tag, via_rule_index) tuples.
-  # rule_set[]-level domains are intentionally skipped (would need file reads).
+  # from inline .route.rules[], then merge domains read from local rule_set files.
   _dom="$(jq -c '
     . as $cfg
     | ($cfg.route.final // null) as $fallback
@@ -283,7 +367,49 @@ if [ "$config_jq_parseable" = "1" ]; then
           )
       ]
   ' /etc/sing-box/config.json 2>/dev/null)"
-  [ -n "$_dom" ] && [ "$_dom" != "null" ] && domain_outbound_map_json="$_dom"
+  [ -n "$_dom" ] && [ "$_dom" != "null" ] || _dom='[]'
+
+  # Add file-backed rule_set domains to domain_outbound_map. If the config has
+  # several route rules referencing the same rule_set, emit one row per route.
+  _file_dom="$(jq -cn \
+    --argjson files "$rule_set_file_domains_json" \
+    --argjson routes "$rule_set_outbound_map_json" \
+    '
+      [
+        $files[]? as $f
+        | ([ $routes[]? | select(.rule_set == $f.rule_set) ]) as $rs
+        | if ($rs | length) > 0 then
+            $rs[]
+            | {
+                domain: $f.domain,
+                match_type: $f.match_type,
+                outbound_tag: .outbound_tag,
+                via_rule_index: .via_rule_index,
+                rule_set: $f.rule_set,
+                rule_set_file: $f.file
+              }
+          else
+            {
+              domain: $f.domain,
+              match_type: $f.match_type,
+              outbound_tag: null,
+              via_rule_index: null,
+              rule_set: $f.rule_set,
+              rule_set_file: $f.file
+            }
+          end
+      ]
+    ' 2>/dev/null)"
+  [ -n "$_file_dom" ] && [ "$_file_dom" != "null" ] || _file_dom='[]'
+
+  _combined_dom="$(jq -cn --argjson inline "$_dom" --argjson files "$_file_dom" '$inline + $files' 2>/dev/null)"
+  [ -n "$_combined_dom" ] && [ "$_combined_dom" != "null" ] && domain_outbound_map_json="$_combined_dom"
+
+  _combined_rule_set_domains="$(jq -cn \
+    --argjson inline "$rule_set_domains_json" \
+    --argjson files "$rule_set_file_domains_json" \
+    '($inline + ($files | map(.domain))) | unique' 2>/dev/null)"
+  [ -n "$_combined_rule_set_domains" ] && [ "$_combined_rule_set_domains" != "null" ] && rule_set_domains_json="$_combined_rule_set_domains"
 fi
 
 # DNS chain
@@ -380,8 +506,11 @@ printf '  "outbounds_detail": %s,\n' "$outbounds_detail_json"
 printf '  "inbounds_detail": %s,\n' "$inbounds_detail_json"
 printf '  "rule_set_domains": %s,\n' "$rule_set_domains_json"
 printf '  "config_proxy_ports": %s,\n' "$config_proxy_ports_json"
-printf '  "probe_schema_version": 2,\n'
+printf '  "probe_schema_version": 3,\n'
 printf '  "selector_groups": %s,\n' "$selector_groups_json"
 printf '  "inbound_outbound_map": %s,\n' "$inbound_outbound_map_json"
+printf '  "rule_set_file_domains": %s,\n' "$rule_set_file_domains_json"
+printf '  "rule_set_outbound_map": %s,\n' "$rule_set_outbound_map_json"
+printf '  "rule_set_file_tag_map": %s,\n' "$rule_set_file_tag_map_json"
 printf '  "domain_outbound_map": %s\n' "$domain_outbound_map_json"
 printf '}\n'

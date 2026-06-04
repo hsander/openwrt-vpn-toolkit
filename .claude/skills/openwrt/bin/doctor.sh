@@ -126,6 +126,7 @@ rules_present=$(get '.rules.present')
 # Новые поля (могут отсутствовать в старом probe — тогда дефолтятся).
 rules_count="$(printf '%s' "$probe_json" | jq -r '.rules.count // 0' 2>/dev/null)"
 rules_files="$(printf '%s' "$probe_json" | jq -r '(.rules.files // []) | join(", ")' 2>/dev/null)"
+rule_set_file_domain_count="$(printf '%s' "$probe_json" | jq -r '(.rule_set_file_domains // []) | length' 2>/dev/null)"
 tproxy_installed=$(get '.tproxy.installed')
 tproxy_running=$(get '.tproxy.running')
 
@@ -246,6 +247,9 @@ fi
 if [ "${rules_count:-0}" -ge 1 ]; then
   rules_ok="$OK"
   rules_details="$rules_count файл(а): $rules_files"
+  if [ "${rule_set_file_domain_count:-0}" -ge 1 ]; then
+    rules_details="$rules_details; доменных записей: $rule_set_file_domain_count"
+  fi
 else
   rules_ok="$FAIL"
   rules_details="нет *.json в /etc/sing-box/rules/"
@@ -384,6 +388,28 @@ count_md_table_rows() {
 subnets_count="$(count_md_table_rows "$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/subnets.md")"
 pins_count="$(count_md_table_rows "$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/pins.md")"
 
+rule_set_routes_section="$(
+  printf '%s' "$probe_json" | jq -r '
+    (.domain_outbound_map // [])
+    | map(select((.rule_set // null) != null))
+    | sort_by(.rule_set, .domain, .outbound_tag // "")
+    | if length == 0 then
+        "- **Доменных записей из rule_set-файлов:** 0\n"
+      else
+        "- **Доменных записей из rule_set-файлов:** " + (length | tostring) + "\n\n" +
+        "| Домен | Match | Rule-set | Outbound | Файл |\n" +
+        "|-------|-------|----------|----------|------|\n" +
+        (map(
+          "| " + (.domain // "?") +
+          " | " + (.match_type // "?") +
+          " | " + (.rule_set // "?") +
+          " | " + (.outbound_tag // "_?_") +
+          " | " + (.rule_set_file // "?") + " |"
+        ) | join("\n")) + "\n"
+      end
+  ' 2>/dev/null
+)"
+
 # Build table rows (markdown). Each row: | # | Component | Icon | Details |
 state_out="$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/state.md"
 
@@ -444,6 +470,13 @@ $( [ -n "$degraded_banner" ] && printf '> %s\n' "$degraded_banner" )
 - **Активных pin'ов:** $pins_count
 - Источник: [\`pins.md\`](./pins.md)
 - Управление: \`bin/pin-device.sh\` (\`unpin-device.sh\` TBD — откат через \`raw-ssh.sh\` или \`restore.sh\`)
+
+## Rule-set domain routes
+
+Домены, найденные внутри файлов \`/etc/sing-box/rules/*.json\`, с outbound,
+выведенным из \`route.rules[].rule_set -> outbound\`.
+
+$rule_set_routes_section
 
 ## Резюме
 

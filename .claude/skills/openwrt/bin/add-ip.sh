@@ -431,6 +431,12 @@ info "router resolved: alias=$ROUTER_ALIAS host=$ROUTER_HOST user=$ROUTER_USER s
 # --- Source extra libs needed for B.2 ----------------------------------------
 # shellcheck source=../lib/install-state-remote.sh
 . "$SKILL_HOME/lib/install-state-remote.sh"
+
+if ! ensure_router_lib_deployed; then
+  echo "add-ip: не смог задеплоить lib/*.sh на роутер — CAS недоступен." >&2
+  exit 2
+fi
+
 # shellcheck source=../lib/memory-journal.sh
 . "$SKILL_HOME/lib/memory-journal.sh"
 # shellcheck source=../lib/template-render.sh

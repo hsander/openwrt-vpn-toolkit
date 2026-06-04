@@ -154,8 +154,10 @@ render_first_time_memory "$ROUTER_ALIAS" "$ROUTER_HOST"
 # --- Temp files (clean up on exit) --------------------------------------------
 TMP_LOCAL="$(mktemp -t openwrt-skill-rule.XXXXXX)"
 TMP_LOCAL_NEW="$(mktemp -t openwrt-skill-rule.XXXXXX)"
+TMP_CONFIG="$(mktemp -t openwrt-skill-config.XXXXXX)"
+TMP_CONFIG_NEW="$(mktemp -t openwrt-skill-config-new.XXXXXX)"
 cleanup() {
-  rm -f "$TMP_LOCAL" "$TMP_LOCAL_NEW" 2>/dev/null || true
+  rm -f "$TMP_LOCAL" "$TMP_LOCAL_NEW" "$TMP_CONFIG" "$TMP_CONFIG_NEW" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -192,6 +194,62 @@ tar -xzf \"\$TAR\" -C /
 # --- Step 2: pull current rule-set (or seed empty v3) -------------------------
 REMOTE_RULESET="/etc/sing-box/rules/vpn-domains.json"
 REMOTE_NEW="/tmp/openwrt-skill-vpn-domains-new.json"
+REMOTE_CONFIG="/etc/sing-box/config.json"
+REMOTE_CONFIG_NEW="/tmp/openwrt-skill-config-new.json"
+config_route_changed=0
+
+trap 'cleanup; ssh_run "rm -f $REMOTE_NEW $REMOTE_CONFIG_NEW" >/dev/null 2>&1 || true' EXIT INT TERM
+
+ensure_vpn_domains_route() {
+  # Current managed router configs may already route user-vpn to auto-failover
+  # but miss the local vpn-domains rule-set that this script writes.
+  if ssh_run "jq -e '
+    any(.route.rule_set[]?; .tag == \"vpn-domains\" and .path == \"$REMOTE_RULESET\")
+    and any(.route.rules[]?; .outbound == \"auto-failover\" and ((.rule_set // []) | index(\"vpn-domains\")))
+  ' $REMOTE_CONFIG >/dev/null" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! scp_from "$REMOTE_CONFIG" "$TMP_CONFIG" >/dev/null 2>&1; then
+    echo "add-domain: не могу скачать $REMOTE_CONFIG для проверки маршрута" >&2
+    return 1
+  fi
+
+  jq --arg ruleset "$REMOTE_RULESET" '
+    .route.rule_set = ((.route.rule_set // []) as $rs
+      | if any($rs[]?; .tag == "vpn-domains") then $rs
+        else $rs + [{"type":"local","tag":"vpn-domains","format":"source","path":$ruleset}]
+        end)
+    | .route.rules = ((.route.rules // []) | map(
+        if .outbound == "auto-failover" and ((.rule_set // []) | index("user-vpn")) then
+          .rule_set = ((.rule_set + ["vpn-domains"]) | unique)
+        else . end
+      ))
+  ' "$TMP_CONFIG" > "$TMP_CONFIG_NEW"
+
+  if ! jq -e --arg ruleset "$REMOTE_RULESET" '
+    any(.route.rule_set[]?; .tag == "vpn-domains" and .path == $ruleset)
+    and any(.route.rules[]?; .outbound == "auto-failover" and ((.rule_set // []) | index("vpn-domains")))
+  ' "$TMP_CONFIG_NEW" >/dev/null; then
+    echo "add-domain: не нашёл auto-failover rule с user-vpn, не могу привязать vpn-domains" >&2
+    return 1
+  fi
+
+  if ! scp_to "$TMP_CONFIG_NEW" "$REMOTE_CONFIG_NEW" >/dev/null 2>&1; then
+    echo "add-domain: scp в $REMOTE_CONFIG_NEW не удался" >&2
+    return 1
+  fi
+
+  if ! ssh_run "set -eu
+sing-box check -c $REMOTE_CONFIG_NEW >/dev/null
+mv -f $REMOTE_CONFIG_NEW $REMOTE_CONFIG
+" >/dev/null 2>&1; then
+    echo "add-domain: не смог валидно привязать vpn-domains к auto-failover" >&2
+    return 1
+  fi
+
+  config_route_changed=1
+}
 
 # Use grep -q over ssh_run to detect presence robustly.
 if ssh_run "test -f $REMOTE_RULESET" >/dev/null 2>&1; then
@@ -237,6 +295,19 @@ already_present="$(jq --arg d "$domain" '
 ' "$TMP_LOCAL")"
 
 if [ "$already_present" = "true" ]; then
+  if ! ensure_vpn_domains_route; then
+    rollback_now "vpn-domains route binding failed"
+    exit 20
+  fi
+
+  if [ "$config_route_changed" = "1" ]; then
+    ssh_run "/etc/init.d/sing-box-tproxy reload >/dev/null 2>&1 || /etc/init.d/sing-box-tproxy restart" >/dev/null 2>&1 || {
+      echo "add-domain: config изменён, но reload не помог — откатываю" >&2
+      rollback_now "service reload failed"
+      exit 20
+    }
+  fi
+
   cat >&2 <<EOF
 add-domain: домен '$domain' уже в rule-set'е — ничего не меняю.
 EOF
@@ -273,9 +344,6 @@ if ! scp_to "$TMP_LOCAL_NEW" "$REMOTE_NEW" >/dev/null 2>&1; then
   exit 2
 fi
 
-# Always clean up remote temp.
-trap 'cleanup; ssh_run "rm -f $REMOTE_NEW" >/dev/null 2>&1 || true' EXIT INT TERM
-
 # Validate v3 schema via sing-box.
 if ! ssh_run "sing-box rule-set format $REMOTE_NEW >/dev/null" 2>&1; then
   echo "add-domain: sing-box rule-set format отверг новый файл — откатываю" >&2
@@ -292,6 +360,12 @@ if ! ssh_run "mkdir -p /etc/sing-box/rules && mv -f $REMOTE_NEW $REMOTE_RULESET"
   exit 20
 fi
 
+if ! ensure_vpn_domains_route; then
+  echo "add-domain: не смог привязать vpn-domains к auto-failover — откатываю" >&2
+  rollback_now "vpn-domains route binding failed"
+  exit 20
+fi
+
 # Full config check.
 if ! ssh_run "sing-box check -c /etc/sing-box/config.json" >/dev/null 2>&1; then
   echo "add-domain: sing-box check отверг config после изменения — откатываю" >&2
@@ -301,7 +375,13 @@ fi
 
 # Hot reload trick: sing-box re-reads local rule_set on file change. Confirm
 # sing-box is alive; if not, attempt a controlled reload (NOT restart).
-if ! ssh_run "pgrep -x sing-box >/dev/null" >/dev/null 2>&1; then
+if [ "$config_route_changed" = "1" ]; then
+  ssh_run "/etc/init.d/sing-box-tproxy reload >/dev/null 2>&1 || /etc/init.d/sing-box-tproxy restart" >/dev/null 2>&1 || {
+    echo "add-domain: config изменён, но reload не помог — откатываю" >&2
+    rollback_now "service reload failed"
+    exit 20
+  }
+elif ! ssh_run "pgrep -x sing-box >/dev/null" >/dev/null 2>&1; then
   ssh_run "/etc/init.d/sing-box-tproxy reload >/dev/null 2>&1 || /etc/init.d/sing-box-tproxy restart" >/dev/null 2>&1 || {
     echo "add-domain: sing-box не запущен и reload не помог — откатываю" >&2
     rollback_now "service reload failed"

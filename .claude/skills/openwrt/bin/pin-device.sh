@@ -496,6 +496,11 @@ esac
 # shellcheck source=../lib/install-state-remote.sh
 . "$SKILL_HOME/lib/install-state-remote.sh"
 
+if ! ensure_router_lib_deployed; then
+  echo "pin-device: не смог задеплоить lib/*.sh на роутер — CAS недоступен." >&2
+  exit 2
+fi
+
 # ---------------------------------------------------------------------------
 # C.2.1 — Pre-backup (skipped only with --no-backup; failure is fatal).
 # backup-now.sh emits the snapshot ID on stdout (last line); tail -n1 isolates
@@ -809,7 +814,7 @@ echo "pin-device.sh: C.2 prep done (config.json edit OK, sing-box check passed).
 #     persistent line in init.d and the runtime rule carry this comment, so
 #     re-runs can locate and replace by *handle resolution from comment* — not
 #     by line/position number.
-#   - Persistent: parse FakeIP line (regex `tproxy.*(198\.18|fakeip)`), insert
+#   - Persistent: parse FakeIP line (regex `(198\.18|fakeip).*tproxy`), insert
 #     pin line right before it, atomic mv.
 #   - Runtime: delete-by-comment + insert-before-FakeIP-handle (so the order
 #     persistent==runtime).
@@ -868,14 +873,14 @@ fi
 # Locate FakeIP rule. We accept either the 198.18/15 redirect destination or an
 # explicit `vpn-kit-fakeip` marker — install-vpn.sh sets up both shapes across
 # versions.
-fakeip_line="$(grep -nE 'tproxy.*(198\.18|fakeip)' "$local_init_script" | head -1)"
+fakeip_line="$(grep -nE '(198\.18|fakeip).*tproxy' "$local_init_script" | head -1)"
 if [ -z "$fakeip_line" ]; then
   echo "pin-device: FakeIP-правило не найдено в /etc/init.d/sing-box-tproxy — incompatible layout" >&2
   rollback_pin "fakeip layout"
   exit 13
 fi
 
-fakeip_count="$(grep -cE 'tproxy.*(198\.18|fakeip)' "$local_init_script")"
+fakeip_count="$(grep -cE '(198\.18|fakeip).*tproxy' "$local_init_script")"
 if [ "$fakeip_count" -gt 1 ]; then
   echo "pin-device: найдено $fakeip_count FakeIP-правил — ambiguous layout, отказ" >&2
   rollback_pin "fakeip ambiguous"
@@ -929,7 +934,7 @@ case "$family" in
     ;;
 esac
 
-nft_rule_body="$nft_saddr $source_value meta mark set 0x1 tproxy ip to $tproxy_port comment \"$pin_id\""
+nft_rule_body="iifname br-lan $nft_saddr $source_value meta l4proto { tcp, udp } meta mark set 0x100000 tproxy ip to $tproxy_port accept comment \"$pin_id\""
 
 # ---------------------------------------------------------------------------
 # C.3.3 — Idempotent patch of init.d/sing-box-tproxy.
@@ -946,7 +951,7 @@ sed -i.bak "/comment \"$pin_id\"/d" "$local_init_script" || {
 
 # Re-locate FakeIP line — dedup above may have shifted line numbers if a stale
 # pin line existed above the FakeIP line.
-fakeip_lineno="$(grep -nE 'tproxy.*(198\.18|fakeip)' "$local_init_script" | head -1 | cut -d: -f1)"
+fakeip_lineno="$(grep -nE '(198\.18|fakeip).*tproxy' "$local_init_script" | head -1 | cut -d: -f1)"
 if [ -z "$fakeip_lineno" ]; then
   echo "pin-device: FakeIP-правило исчезло после dedup — внутренняя ошибка" >&2
   rollback_pin "fakeip postdedup"
@@ -1008,7 +1013,7 @@ ssh_run "
 " >/dev/null 2>&1 || true
 
 # Locate FakeIP rule handle.
-fakeip_handle="$(ssh_run "nft -a list chain inet sing_box_tproxy mangle_prerouting 2>/dev/null | grep -E 'tproxy.*(198\.18|fakeip)' | grep -oE 'handle [0-9]+' | awk '{print \$2}' | head -1" 2>/dev/null || true)"
+fakeip_handle="$(ssh_run "nft -a list chain inet sing_box_tproxy mangle_prerouting 2>/dev/null | grep -E '(198\.18|fakeip).*tproxy' | grep -oE 'handle [0-9]+' | awk '{print \$2}' | head -1" 2>/dev/null || true)"
 if [ -z "$fakeip_handle" ] || ! printf '%s' "$fakeip_handle" | grep -qE '^[0-9]+$'; then
   echo "pin-device: не нашёл runtime handle FakeIP-правила в chain inet sing_box_tproxy mangle_prerouting" >&2
   rollback_pin "fakeip runtime missing"
