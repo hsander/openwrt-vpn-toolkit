@@ -1,98 +1,153 @@
 # openwrt-skill
 
-Claude-навык для безопасной настройки и обслуживания OpenWRT-роутеров со связкой **sing-box (VLESS Reality) + zapret + LAN-прокси + Telegram-watchdog**.
+**AI-powered OpenWrt router management** — configure VPN, bypass censorship, and keep YouTube working, all by just chatting with Claude. No networking skills required.
 
-Архитектура одной фразой: **агент НЕ выполняет сырой SSH — только вызывает скрипты из `bin/`**, которые сами делают snapshot, валидацию, staged-apply, и обновляют память.
+> [Документация на русском →](./README.ru.md)
 
-## Что умеет (V1, OpenWRT-роутер)
+---
 
-| Сценарий | Скрипт | Что делает |
-|----------|--------|------------|
-| Probe состояния | `bin/doctor.sh` | 20-пунктовый чек-лист → `memory/<alias>/state.md` |
-| Первичная SSH-настройка | `bin/setup-ssh.sh` | ed25519, install в authorized_keys, ~/.ssh/config alias |
-| Watchdog с TG-алертами | `bin/setup-watchdog.sh` | `/etc/router-watchdog.conf` + cron-задачи |
-| Полный VPN-bootstrap | `bin/install-vpn.sh` | парсит `vless://`, ставит пакеты, sing-box + tproxy + DNS chain |
-| Добавить домен в VPN | `bin/add-domain.sh` | rule_set merge, hot reload |
-| Удалить домен | `bin/remove-domain.sh` | reverse |
-| Добавить VPN-ноду | `bin/add-vpn.sh` | outbound + auto-failover + zapret set |
-| Удалить VPN-ноду | `bin/remove-vpn.sh` | reverse |
-| Добавить LAN-прокси | `bin/add-proxy.sh` | mixed-inbound :400X |
-| IP-маршрут | `bin/add-ip.sh` | **STUB (V1.1)** — выдаёт инструкцию через escape hatch |
-| Пин устройства | `bin/pin-device.sh` | **STUB (V1.1)** — выдаёт инструкцию через escape hatch |
-| Snapshot | `bin/backup-now.sh` | архив `/etc/sing-box`, init.d, etc |
-| Откат | `bin/restore.sh` | staged-apply с двойным snapshot'ом |
-| Здоровье | `bin/health.sh` | sing-box status, nft, DNS, SOCKS exit IP |
-| Логи | `bin/logs.sh` | tail sing-box / watchdog / zapret |
-| Сырой SSH | `bin/raw-ssh.sh` | escape hatch — требует подтверждения у юзера |
+## What it does
 
-## Установка навыка
+You open this project in Claude Code and simply say:
 
-Это **project-scoped skill** — он живёт внутри репозитория в
-`.claude/skills/openwrt/` и автоматически активируется только при работе
-Claude в этой папке. Глобальная регистрация не нужна.
+> *"Set up VPN on my router"*  
+> *"YouTube stopped working, fix it"*  
+> *"Route my TV through the US server"*  
+> *"Add Instagram to the bypass list"*
+
+Claude handles everything: connects to the router over SSH, makes a backup, applies the change safely, and rolls back automatically if something goes wrong.
+
+---
+
+## Who is this for
+
+- People in countries with internet censorship (Russia, Iran, China, Belarus, UAE, ...)
+- Anyone who wants **YouTube, Instagram, Telegram, Twitter** to just work
+- People who want a **VPN on the router level** — so every device at home is covered without installing anything
+- Developers and sysadmins who manage OpenWrt routers and want AI automation
+
+**No networking knowledge required.** You don't need to know what sing-box, VLESS, Reality, tproxy, or nftables are. Claude knows.
+
+---
+
+## What you need
+
+| | |
+|---|---|
+| Router | OpenWrt 23.05+ (tested on 24.10 / 25.x) |
+| VPN | A VLESS/Reality server (e.g. from a VPS or a VPN provider) |
+| Agent machine | macOS or Linux with Claude Code installed |
+| Claude | Claude Code CLI ([claude.ai/code](https://claude.ai/code)) |
+
+---
+
+## What works out of the box
+
+| Goal | What Claude does |
+|------|-----------------|
+| YouTube / Instagram / Twitter / Telegram unblocked | Routes those domains through VPN automatically |
+| Full router VPN (all devices covered) | Installs sing-box with tproxy — every device on Wi-Fi uses VPN |
+| Pin one device to a specific server | e.g. your TV always goes through the US server |
+| Multiple VPN servers with auto-failover | If one server is down, traffic switches to the next one instantly |
+| LAN proxy (manual per-app VPN) | HTTP/SOCKS5 proxy port for apps that support it |
+| Telegram watchdog alerts | Get notified if the router loses internet or VPN breaks |
+| Safe config changes with auto-rollback | Every change is snapshotted; if SSH drops after a restart, it rolls back |
+| Add/remove domains from VPN list | Without restarting sing-box |
+
+---
+
+## Quick start
 
 ```bash
-# 1. Открой проект в Claude Code из этой папки
-cd /path/to/openwrt-skill   # папка содержит .claude/skills/openwrt/
+# 1. Clone
+git clone https://github.com/your-org/openwrt-skill
+cd openwrt-skill
 
-# 2. Создай реестр роутеров
+# 2. Install dependencies (macOS)
+brew install jq yq openssh
+
+# 3. Add your router
 cp .claude/skills/openwrt/memory/routers.yaml.example \
    .claude/skills/openwrt/memory/routers.yaml
-# отредактируй: добавь свои роутеры (alias, host)
+# Edit routers.yaml: set alias, host IP, ssh user
 
-# 3. В Claude Code, попроси
->>> настрой роутер home
+# 4. Open in Claude Code
+claude .
+
+# 5. Say what you want
+# >>> set up VPN on my home router
+# >>> add youtube.com to the bypass list
+# >>> check why Instagram is not working
 ```
 
-Дальше Claude прочитает `SKILL.md`, запустит `bin/doctor.sh --router home`, покажет `state.md` и предложит, что настроить.
+---
 
-## Требования на машине агента
+## How it works (for the curious)
 
-```bash
-brew install jq yq flock openssh
-# опционально (только для тестов): bats-core
+```
+You (chat) → Claude → bin/*.sh scripts → SSH → OpenWrt router
+                           ↓
+                    snapshot before change
+                    validate config
+                    staged apply
+                    reachability check → auto-rollback if SSH drops
+                    update local memory files
 ```
 
-На роутере (OpenWRT) скрипты ставят `sing-box`, `https-dns-proxy`, `kmod-nft-tproxy`, `kmod-nft-queue`, `coreutils-sort`, `gzip`, `jq`, `curl`, `ca-bundle`, `ca-certificates`. Минимум OpenWRT 24.10 (для `apk`-based dependency).
+**Claude never runs raw SSH commands.** Every operation goes through a script in `bin/` that does: backup → validate → apply → verify → update memory. If the router becomes unreachable after a restart, the previous snapshot is restored automatically.
 
-## Принципы
+The VPN stack:
+- **sing-box** (VLESS + Reality) — the actual VPN tunnel
+- **tproxy + nftables** — intercepts traffic at the router level, no client config needed
+- **sing-box FakeIP DNS** — routes domains to VPN without leaking DNS queries
+- **zapret** (optional) — deep packet inspection bypass for extra stubborn blocks
 
-- **Safe API only.** Список разрешённых операций — это файлы в `bin/`. Всё остальное требует явного подтверждения через `raw-ssh.sh`.
-- **Snapshot before mutate.** Каждая mutating-операция начинается с pre-backup. Откат — `bin/restore.sh`.
-- **No secrets in memory.** UUID, токены, private keys никогда не пишутся в MD-файлы и журнал.
-- **Staged apply.** Restarts происходят через `lib/staged-apply.sh` с reachability-watcher: если SSH/health отвалился — auto-rollback.
-- **Memory updated only on success.** `state.md` / `domains.md` / `vpns.md` обновляются скриптом только при exit 0.
+---
 
-См. [`SKILL.md`](./.claude/skills/openwrt/SKILL.md) — инструкции для агента (что когда вызывать).
-См. [`memory/README.md`](./.claude/skills/openwrt/memory/README.md) — как устроена память.
-См. [`runbooks/`](./.claude/skills/openwrt/runbooks/) — пошаговые гайды под каждый сценарий.
+## Security
 
-## Безопасность и mitigations
+- SSH key is generated per-router (`~/.ssh/openwrt_<alias>_ed25519`), never reused
+- VPN secrets (UUID, private keys) stay **only on the router** — never written to chat, memory files, or logs
+- Snapshots stored on the router in `/etc/vpn-kit/snapshots/` (chmod 700, root only)
+- `memory/routers.yaml` is gitignored — your router IPs never end up in the repo
 
-Навык создаёт **passphraseless ed25519 ключ** в `~/.ssh/openwrt_<alias>_ed25519` (для agent-автоматизации) и использует `StrictHostKeyChecking=accept-new` (TOFU при первом подключении). Это сознательный trade-off — но он требует от тебя:
+**If your laptop is stolen:** change your VPN keys, rotate the Telegram bot token, remove the SSH key from each router's `authorized_keys`. See [README.ru.md](./README.ru.md#если-ноутбук-украли) for the full checklist.
 
-1. **Full-disk encryption на ноутбуке.** Кража машины = root на всех твоих роутерах из `routers.yaml`. macOS: FileVault обязателен. Linux: LUKS.
-2. **Локальный физический контроль над машиной во время `setup-ssh`.** Первое подключение к новому роутеру не проверено криптографически. Лучше делать setup из доверенной сети (LAN рядом с роутером, не публичный WiFi).
-3. **Хранение `memory/routers.yaml` вне публичных репо.** Файл сам по себе не секрет (только alias/host/ssh_alias), но в сочетании с украденным ключом — карта для атаки. `.gitignore` навыка уже исключает `memory/*/` и `memory/routers.yaml` — не убирай.
-4. **TG_TOKEN живёт ТОЛЬКО на роутере** в `/etc/router-watchdog.conf` (chmod 600). На агент-сайде временный файл (см. `setup-watchdog.sh` Phase 1 инструкции) shred'ится после успешной заливки. Не редактируй `--keep-local` без причины.
-5. **VPN-секреты (UUID/Reality keys) живут ТОЛЬКО в `/etc/sing-box/config.json` на роутере.** Никогда не пишутся в `memory/`, journal, чат. `lib/memory-journal.sh` enforced'ит это.
-6. **Snapshots на роутере содержат TG_TOKEN** (в `/etc/router-watchdog.conf` под тарболом). Папка `/etc/vpn-kit/snapshots/` chmod 700, доступна только root. Если копируешь snapshot с роутера к себе — учти.
+---
 
-### Если ноутбук украли
+## Project layout
 
-1. Сменить TG_TOKEN у @BotFather (старый become useless → watchdog'и онемеют).
-2. Сменить UUID/Reality keys у VPN-провайдера (старые VPN-ключи перестанут работать).
-3. На каждом роутере: руками удалить старый SSH ключ из `authorized_keys`. Если есть сеть к роутеру с другой машины — ssh туда и затереть строку. Если нет — заводская сброс/перенастройка.
-4. Восстановить навык: `bin/setup-ssh.sh --router <alias> --host ...` создаст новый ключ, остальное вернётся.
-
-### Высокочувствительный сценарий
-
-Если роутер критичен (бизнес, инфраструктура) — добавь passphrase на ключ руками после первого setup:
-```bash
-ssh-keygen -p -f ~/.ssh/openwrt_<alias>_ed25519
 ```
-и держи открытым `ssh-agent`. Скрипты использут `IdentitiesOnly yes` + agent через `~/.ssh/config`, так что passphrase будет запрашиваться при каждой сессии (или один раз через `ssh-add`).
+.claude/skills/openwrt/
+├── SKILL.md          # Claude's instructions — what to call when
+├── bin/              # Safe API: atomic operations (Claude calls only these)
+│   ├── doctor.sh     # 20-point health check → state.md
+│   ├── setup-ssh.sh  # First-time SSH key setup
+│   ├── install-vpn.sh# Full VPN bootstrap (parses vless://)
+│   ├── add-domain.sh # Add domain to VPN bypass list
+│   ├── add-vpn.sh    # Add VPN server node
+│   ├── pin-device.sh # Pin LAN device to specific server
+│   ├── add-ip.sh     # Add IP subnet route
+│   ├── backup-now.sh # Manual snapshot
+│   ├── restore.sh    # Rollback to snapshot
+│   └── ...
+├── lib/              # Shared helpers (sourced by bin/, not called directly)
+├── memory/           # Per-router state: routers.yaml + <alias>/*.md
+├── runbooks/         # Step-by-step guides for each scenario
+└── templates/        # sing-box config templates
+```
 
-## Лицензия
+---
 
-TBD.
+## Related
+
+- [sing-box](https://sing-box.sagernet.org/) — the VPN core
+- [OpenWrt](https://openwrt.org/) — the router OS
+- [Claude Code](https://claude.ai/code) — the AI agent that drives this skill
+- [zapret](https://github.com/bol-van/zapret) — DPI bypass for Russia and similar networks
+
+---
+
+## License
+
+MIT
