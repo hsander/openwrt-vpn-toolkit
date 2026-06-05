@@ -37,7 +37,7 @@ bin/                   # ← safe API. Каждый скрипт — атома�
   setup-watchdog.sh    # /etc/router-watchdog.conf + cron
   install-vpn.sh       # парсит vless://, поднимает sing-box на чистом роутере
   adopt.sh             # уже настроенный роутер → snapshot + probe + рендер memory (read-only)
-  add-domain.sh        # → rules/vpn-domains.json, validate, hot reload
+  add-domain.sh        # → rules/vpn-domains.json (auto-failover) или rules/user-<tag>-domains.json (per-tag), validate, hot reload
   remove-domain.sh
   add-vpn.sh           # outbound + auto-failover + zapret vpn_servers set
   remove-vpn.sh
@@ -97,7 +97,8 @@ openwrt/               # файлы, которые ставятся НА роу
 
 **Поддержано:**
 - VLESS Reality outbounds (только эта схема URL).
-- `add-domain` ТОЛЬКО с `--outbound auto-failover` (per-tag pinning отложен в V1.1).
+- `add-domain` с `--outbound auto-failover` (→ `vpn-domains.json`) и с `--outbound <tag>` (→ `user-<tag>-domains.json`, файл + маршрут создаются автоматически; outbound должен уже быть в config.json).
+- `remove-domain` сканирует все `*.json` в `/etc/sing-box/rules/` — работает для любого rule-set файла, включая JSONC с `//`-комментариями.
 - LAN proxy на mixed-inbound портах 4000-4099.
 - `add-ip.sh` — IPv4-адреса/CIDR в общий nft-сет `proxy_subnets` (`--via auto`, без per-tag pin).
 - `pin-device.sh` — pin LAN-устройства (source-ip/CIDR) на конкретный outbound через `route.rules` + nft tproxy.
@@ -127,16 +128,25 @@ openwrt/               # файлы, которые ставятся НА роу
 ## Поток "добавить домен"
 
 ```
-bin/add-domain.sh --router <alias> --domain <domain> [--outbound auto-failover]
+bin/add-domain.sh --router <alias> --domain <domain> [--outbound <tag>]
 ```
-В V1 `--outbound` принимает **только** `auto-failover`. Любой другой tag → exit 13 с понятным сообщением (full pinning — в V1.1).
 
-Что скрипт делает (агенту знать только это):
+`--outbound` по умолчанию = `auto-failover`. Поддерживает любой существующий outbound-tag:
+
+| `--outbound` | rule-set файл | config.json |
+|---|---|---|
+| `auto-failover` | `rules/vpn-domains.json` (tag: `vpn-domains`) | добавляется в auto-failover rule |
+| `<tag>` (напр. `usa-4`) | `rules/user-<tag>-domains.json` (tag: `user-<tag>`) | создаётся новый route rule перед auto-failover + DNS fakeip |
+
+Outbound `<tag>` должен уже существовать в `config.json` (иначе exit 13). Файл rule-set создаётся при первом добавлении домена.
+
+Что скрипт делает:
 1. Pre-backup → snapshot ID запоминается.
-2. Читает `/etc/sing-box/rules/vpn-domains.json`, мерджит, валидирует.
+2. Тянет rule-set файл (или создаёт v3-болванку), мерджит домен.
 3. Атомарная запись на роутере → `sing-box rule-set format` → `sing-box check`.
-4. Rule-set перечитывается горячо (без restart).
-5. `memory/<alias>/domains.md` и `journal.md` обновлены.
+4. Если нужно — прописывает rule_set в `dns.rules` (fakeip) и `route.rules` в `config.json`.
+5. Hot-reload sing-box (без restart).
+6. `memory/<alias>/domains.md` и `journal.md` обновлены.
 
 Если exit ≠ 0 — snapshot уже восстановлен. Прочитай stderr и сообщи пользователю.
 

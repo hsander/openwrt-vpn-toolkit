@@ -15,7 +15,7 @@ Pre-conditions (что должно быть в `memory/<alias>/state.md`):
 ## Шаг 1. Что спросить у пользователя
 
 1. **Домен.** Если пользователь написал просто «добавь youtube» — переспроси: «`youtube.com` или какой-то поддомен?». Не угадывай.
-2. **Outbound (опционально).** По умолчанию — `auto-failover` (рекомендация для 95% случаев). Спрашивай только если пользователь сам упомянул конкретный tag («через node-de», «через ноду Германии»). Если упомянул — сверь tag со списком в `memory/<alias>/vpns.md`. Если такого tag'а нет — переспроси.
+2. **Outbound (опционально).** По умолчанию — `auto-failover` (рекомендация для 95% случаев). Спрашивай только если пользователь упомянул конкретный tag («через usa-4», «через США»). Если упомянул — сверь tag со списком в `memory/<alias>/vpns.md`. Если такого tag'а нет — переспроси. Поддерживается любой существующий outbound.
 
 ### Валидация домена локально (до запуска скрипта)
 - Должен быть в нижнем регистре. Если пользователь написал `YouTube.COM` — приведи к `youtube.com` молча и подтверди в финальном сообщении.
@@ -35,17 +35,26 @@ Pre-conditions (что должно быть в `memory/<alias>/state.md`):
 ## Шаг 2. Выполнение
 
 ```bash
-bin/add-domain.sh --router <alias> --domain <domain>
+bin/add-domain.sh --router <alias> --domain <domain> [--outbound <tag>]
 ```
-(добавь `--outbound <tag>`, только если пользователь явно попросил конкретный outbound)
+(добавь `--outbound <tag>`, только если пользователь явно попросил конкретный outbound; по умолчанию `auto-failover`)
 
 Что делает:
 1. pre-backup на роутере → snapshot ID запоминается;
-2. SCP `vpn-domains.json` локально, мердж в `domain_suffix` первого правила (или seed v3);
+2. SCP rule-set файла локально (или seed v3 если отсутствует), мердж домена;
+   - `auto-failover` → `vpn-domains.json`
+   - `<tag>` → `user-<tag>-domains.json` (файл создаётся при первом добавлении)
 3. валидация локально + `sing-box rule-set format` на роутере + `sing-box check`;
-4. atomic mv в `/etc/sing-box/rules/vpn-domains.json`;
-5. hot-reload sing-box (без рестарта tproxy);
-6. обновление `memory/<alias>/domains.md` + журнал.
+4. atomic mv rule-set файла на место;
+5. если нужно — прописывает rule_set в `dns.rules` (fakeip) и `route.rules` в `config.json`;
+6. hot-reload sing-box (без рестарта tproxy);
+7. обновление `memory/<alias>/domains.md` + журнал.
+
+Файл на роутере:
+- `auto-failover` → `/etc/sing-box/rules/vpn-domains.json`
+- `usa-4` → `/etc/sing-box/rules/user-usa-4-domains.json`
+- `polsha` → `/etc/sing-box/rules/user-polsha-domains.json`
+- и т.д.
 
 Exit codes:
 - `0` — добавлено. Если домен **уже был** — скрипт делает no-op idempotent skip, тоже exit 0. Распознай по stderr (там будет «уже в списке»).

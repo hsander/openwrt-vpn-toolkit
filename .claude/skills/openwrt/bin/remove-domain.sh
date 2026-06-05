@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# bin/remove-domain.sh — remove a domain from /etc/sing-box/rules/vpn-domains.json.
-# Mirror of bin/add-domain.sh.
+# bin/remove-domain.sh — remove a domain from sing-box rule_sets.
+# Searches ALL *.json files under /etc/sing-box/rules/ (not just vpn-domains.json),
+# so it works regardless of which file the domain lives in.
 #
 # Usage:
 #   bin/remove-domain.sh --router <alias> --domain <domain> [--no-backup]
@@ -32,7 +33,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage: bin/remove-domain.sh --router <alias> --domain <domain> [--no-backup]
 
-Удаляет домен из rule_set /etc/sing-box/rules/vpn-domains.json (v3),
+Удаляет домен из ЛЮБОГО rule_set в /etc/sing-box/rules/*.json,
 валидирует, hot-reload sing-box. Снимок до изменения создаётся автоматически.
 
 Options:
@@ -88,46 +89,38 @@ fi
 
 render_first_time_memory "$ROUTER_ALIAS" "$ROUTER_HOST"
 
-TMP_LOCAL="$(mktemp -t openwrt-skill-rule.XXXXXX)"
-TMP_LOCAL_NEW="$(mktemp -t openwrt-skill-rule.XXXXXX)"
-cleanup() {
-  rm -f "$TMP_LOCAL" "$TMP_LOCAL_NEW" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
-
-REMOTE_RULESET="/etc/sing-box/rules/vpn-domains.json"
-REMOTE_NEW="/tmp/openwrt-skill-vpn-domains-new.json"
-
-# If the file doesn't exist on the router, the domain trivially isn't there.
-if ! ssh_run "test -f $REMOTE_RULESET" >/dev/null 2>&1; then
-  echo "remove-domain: $REMOTE_RULESET не существует — (уже отсутствует)" >&2
-  exit 0
-fi
-
-if ! scp_from "$REMOTE_RULESET" "$TMP_LOCAL" >/dev/null 2>&1; then
-  echo "remove-domain: не могу скачать $REMOTE_RULESET" >&2
-  exit 2
-fi
+REMOTE_RULES_DIR="/etc/sing-box/rules"
+REMOTE_CONFIG="/etc/sing-box/config.json"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "remove-domain: локально нужен jq (brew install jq)" >&2
   exit 13
 fi
 
-if ! jq -e '.' "$TMP_LOCAL" >/dev/null 2>&1; then
-  echo "remove-domain: $REMOTE_RULESET не валидный JSON" >&2
-  exit 13
-fi
+# --- Find which rule-set files contain the domain (one SSH round-trip) --------
+# Uses grep instead of jq so it works for both plain JSON and JSONC (files with
+# // comments, like user-vpn-domains.json). Domain is validated [a-z0-9.-].
+files_with_domain="$(ssh_run "
+set -eu
+found=''
+for f in $REMOTE_RULES_DIR/*.json; do
+  case \"\$f\" in *.bak*) continue;; esac
+  [ -f \"\$f\" ] || continue
+  if grep -qF '\"$domain\"' \"\$f\" 2>/dev/null; then
+    found=\"\$found \$f\"
+  fi
+done
+printf '%s' \"\$found\"
+" 2>/dev/null || true)"
 
-# Idempotency: if domain absent across all rules — exit 0, no journal.
-present="$(jq --arg d "$domain" '
-  ((.rules // []) | [ .[]?.domain_suffix // [] ] | add // []) | index($d) != null
-' "$TMP_LOCAL")"
+files_with_domain="${files_with_domain# }"  # trim leading space
 
-if [ "$present" != "true" ]; then
-  echo "remove-domain: '$domain' (уже отсутствует) — ничего не делаю" >&2
+if [ -z "$files_with_domain" ]; then
+  echo "remove-domain: '$domain' не найден ни в одном rule-set — ничего не делаю" >&2
   exit 0
 fi
+
+echo "remove-domain: домен найден в: $files_with_domain" >&2
 
 # --- pre-backup ---------------------------------------------------------------
 snapshot_id=""
@@ -156,42 +149,59 @@ tar -xzf \"\$TAR\" -C /
 " >/dev/null 2>&1 || true
 }
 
-# --- Build new rule-set without the domain ------------------------------------
-jq --arg d "$domain" '
-  .rules = ((.rules // []) | map(
-    if (.domain_suffix // null) != null then
-      .domain_suffix = (.domain_suffix - [$d])
-    else . end
-  ))
-  | .version = (.version // 3)
-' "$TMP_LOCAL" > "$TMP_LOCAL_NEW"
+# --- Temp files ---------------------------------------------------------------
+TMP_LOCAL="$(mktemp -t openwrt-skill-rule.XXXXXX)"
+TMP_LOCAL_NEW="$(mktemp -t openwrt-skill-rule.XXXXXX)"
+cleanup() {
+  rm -f "$TMP_LOCAL" "$TMP_LOCAL_NEW" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 
-if ! jq -e '.' "$TMP_LOCAL_NEW" >/dev/null 2>&1; then
-  echo "remove-domain: после merge JSON битый" >&2
-  exit 13
-fi
+# --- Remove domain from each file that contains it ----------------------------
+for REMOTE_RULESET in $files_with_domain; do
+  REMOTE_NEW="/tmp/openwrt-skill-rule-new-$$.json"
+  trap "cleanup; ssh_run 'rm -f $REMOTE_NEW' >/dev/null 2>&1 || true" EXIT INT TERM
 
-# --- Push to /tmp, validate, atomic mv ---------------------------------------
-if ! scp_to "$TMP_LOCAL_NEW" "$REMOTE_NEW" >/dev/null 2>&1; then
-  echo "remove-domain: scp в $REMOTE_NEW не удался" >&2
-  exit 2
-fi
+  if ! scp_from "$REMOTE_RULESET" "$TMP_LOCAL" >/dev/null 2>&1; then
+    echo "remove-domain: не могу скачать $REMOTE_RULESET" >&2
+    rollback_now "scp failed"
+    exit 2
+  fi
 
-trap 'cleanup; ssh_run "rm -f $REMOTE_NEW" >/dev/null 2>&1 || true' EXIT INT TERM
+  # Remove the domain line. Works for both plain JSON and JSONC (files with
+  # // comments). sing-box rule-set format (below) validates the result and
+  # tolerates trailing commas in JSONC, so no extra comma cleanup needed.
+  sed -e "/\"$domain\"/d" "$TMP_LOCAL" > "$TMP_LOCAL_NEW"
 
-if ! ssh_run "sing-box rule-set format $REMOTE_NEW >/dev/null" 2>&1; then
-  echo "remove-domain: sing-box rule-set format отверг новый файл — откатываю" >&2
-  rollback_now "невалидный rule-set"
-  exit 20
-fi
+  if ! grep -q . "$TMP_LOCAL_NEW"; then
+    echo "remove-domain: результат пустой — что-то пошло не так" >&2
+    rollback_now "empty result"
+    exit 13
+  fi
 
-if ! ssh_run "mv -f $REMOTE_NEW $REMOTE_RULESET" >/dev/null 2>&1; then
-  echo "remove-domain: не смог переместить rule-set — откатываю" >&2
-  rollback_now "mv failed"
-  exit 20
-fi
+  if ! scp_to "$TMP_LOCAL_NEW" "$REMOTE_NEW" >/dev/null 2>&1; then
+    echo "remove-domain: scp в $REMOTE_NEW не удался" >&2
+    rollback_now "scp to /tmp failed"
+    exit 2
+  fi
 
-if ! ssh_run "sing-box check -c /etc/sing-box/config.json" >/dev/null 2>&1; then
+  if ! ssh_run "sing-box rule-set format $REMOTE_NEW >/dev/null" 2>&1; then
+    echo "remove-domain: sing-box rule-set format отверг $REMOTE_RULESET — откатываю" >&2
+    rollback_now "невалидный rule-set"
+    exit 20
+  fi
+
+  if ! ssh_run "mv -f $REMOTE_NEW $REMOTE_RULESET" >/dev/null 2>&1; then
+    echo "remove-domain: не смог переместить rule-set — откатываю" >&2
+    rollback_now "mv failed"
+    exit 20
+  fi
+
+  echo "remove-domain: обновлён $REMOTE_RULESET" >&2
+done
+
+# --- Final config validate + reload -------------------------------------------
+if ! ssh_run "sing-box check -c $REMOTE_CONFIG" >/dev/null 2>&1; then
   echo "remove-domain: sing-box check отверг config — откатываю" >&2
   rollback_now "sing-box check failed"
   exit 20
@@ -199,7 +209,7 @@ fi
 
 if ! ssh_run "pgrep -x sing-box >/dev/null" >/dev/null 2>&1; then
   ssh_run "/etc/init.d/sing-box-tproxy reload >/dev/null 2>&1 || /etc/init.d/sing-box-tproxy restart" >/dev/null 2>&1 || {
-    echo "remove-domain: sing-box не запущен и reload не помог — откатываю" >&2
+    echo "remove-domain: reload не помог — откатываю" >&2
     rollback_now "service reload failed"
     exit 20
   }
@@ -210,26 +220,21 @@ DOMAINS_MD="$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/domains.md"
 
 if [ -f "$DOMAINS_MD" ]; then
   tmp_md="$(mktemp -t openwrt-skill-domains.XXXXXX)"
-  # Drop any row whose first column matches `| $domain |`.
-  # Then check if the table became empty; if so, insert _(пусто)_ marker.
   awk -v d="$domain" '
-    BEGIN { in_table = 0; rows_kept = 0; saw_table = 0; printed_empty = 0 }
-    /^\|[[:space:]]*-+/ { in_table = 1; saw_table = 1; print; next }
+    BEGIN { in_table = 0; rows_kept = 0; printed_empty = 0 }
+    /^\|[[:space:]]*-+/ { in_table = 1; print; next }
     in_table == 1 && /^\|/ {
-      # Extract first cell value (trim).
       line = $0
-      # First "|" is at start; find the next "|" to delimit cell 1.
       n = index(substr(line, 2), "|")
       if (n > 0) {
         cell1 = substr(line, 2, n - 1)
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", cell1)
-        if (cell1 == d) { next }   # skip
+        if (cell1 == d) { next }
       }
       rows_kept++
       print
       next
     }
-    # Leaving the table.
     in_table == 1 && !/^\|/ {
       in_table = 0
       if (rows_kept == 0 && printed_empty == 0) {
@@ -261,8 +266,9 @@ cat >&2 <<EOF
 remove-domain: готово.
   router:    $ROUTER_ALIAS
   domain:    $domain
+  files:     $files_with_domain
   snapshot:  ${snapshot_id:-(skipped)}
-  rule-set:  $REMOTE_RULESET (validated + hot-reloaded)
+  config:    validated + hot-reloaded
 EOF
 
 exit 0

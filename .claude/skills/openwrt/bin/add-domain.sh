@@ -1,29 +1,37 @@
 #!/usr/bin/env bash
 # bin/add-domain.sh — append a domain to the sing-box rule_set used by the VPN
-# routing path. Single edit point: /etc/sing-box/rules/vpn-domains.json (rule_set v3).
+# routing path.
+#
+# For --outbound auto-failover:
+#   Writes to /etc/sing-box/rules/vpn-domains.json (tag: vpn-domains).
+#
+# For --outbound <tag>:
+#   Writes to /etc/sing-box/rules/user-<tag>-domains.json (tag: user-<tag>).
+#   Creates the file if absent, and wires rule_set + dns.rules fakeip +
+#   route.rules into config.json automatically (insert before auto-failover).
+#   Requires the outbound tag to already exist in config.json (add it first
+#   via bin/add-vpn.sh).
 #
 # Flow:
 #   1. Resolve router + SSH alive.
-#   2. Validate domain shape (lowercase / dots / hyphens; no IPs; no `vless://`).
-#   3. Pre-backup via bin/backup-now.sh — capture snapshot ID for rollback.
-#   4. SCP rule-set file down (or seed minimal v3 if absent). Merge domain into
-#      the first rule's `domain_suffix` array. Validate JSON locally.
-#   5. SCP back to /tmp on router. Validate via `sing-box rule-set format`.
-#      Atomic mv to /etc/sing-box/rules/vpn-domains.json + sing-box check on
-#      the main config. Hot-reload (rule_set auto-reloads); if process not
-#      running, fall back to `service sing-box-tproxy reload`.
-#   6. On failure after the SCP step — restore the snapshot.
-#   7. Update memory/<alias>/domains.md (defensive table edit).
-#   8. Journal: `add_domain`.
+#   2. Validate domain shape.
+#   3. Pre-backup via bin/backup-now.sh.
+#   4. Pull rule-set file (or seed minimal v3). Merge domain. Validate JSON.
+#   5. Push to /tmp on router. Validate via sing-box rule-set format.
+#      Atomic mv. Ensure config.json routes the rule_set correctly.
+#      sing-box check. Hot-reload.
+#   6. On failure after SCP — restore snapshot.
+#   7. Update memory/<alias>/domains.md.
+#   8. Journal: add_domain.
 #
 # Usage:
 #   bin/add-domain.sh --router <alias> --domain <domain> [--outbound <tag>] [--no-backup]
 #
 # Exit codes:
-#   0   ok (or no-op idempotent skip — also ok)
+#   0   ok (or no-op idempotent skip)
 #   2   router not found / SSH unreachable
-#  13   validation error (bad domain, secret in label)
-#  20   rollback fired — operation reverted
+#  13   validation error (bad domain, unknown outbound, secret in label)
+#  20   rollback fired
 #  64   bad CLI args
 
 set -euo pipefail
@@ -46,8 +54,12 @@ usage() {
   cat >&2 <<'EOF'
 Usage: bin/add-domain.sh --router <alias> --domain <domain> [--outbound <tag>] [--no-backup]
 
-Добавляет домен в rule_set /etc/sing-box/rules/vpn-domains.json (v3),
-валидирует, hot-reload sing-box. Снимок до изменения создаётся автоматически.
+Добавляет домен в rule_set для указанного outbound.
+
+  --outbound auto-failover  → /etc/sing-box/rules/vpn-domains.json (default)
+  --outbound <tag>          → /etc/sing-box/rules/user-<tag>-domains.json
+                              (файл + маршрут создаются автоматически;
+                               outbound должен уже быть в config.json)
 
 Options:
   --router <alias>   alias из memory/routers.yaml (обяз.)
@@ -77,9 +89,7 @@ done
 [ -z "$router" ] && { echo "add-domain: --router обязателен" >&2; usage; }
 [ -z "$domain" ] && { echo "add-domain: --domain обязателен" >&2; usage; }
 
-# --- Validate domain shape -----------------------------------------------------
-# Lowercase ascii letters/digits/dots/hyphens. No `vless://`-looking content
-# (which would suggest someone pasted a VPN URL). Reject IPs (use add-ip.sh).
+# --- Validate domain shape ----------------------------------------------------
 if printf '%s' "$domain" | grep -qE 'vless://|^[a-z]+://'; then
   echo "add-domain: --domain выглядит как URL, нужен голый FQDN" >&2
   exit 13
@@ -90,35 +100,27 @@ if ! printf '%s' "$domain" | grep -qE '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'; then
   exit 13
 fi
 
-# Reject double-dot / leading-dot / trailing-dot / leading-hyphen patterns.
 if printf '%s' "$domain" | grep -qE '\.\.|^\.|\.$|^-|-\.|\.-'; then
   echo "add-domain: некорректная форма домена '$domain'" >&2
   exit 13
 fi
 
-# Reject IPv4: dotted quad of 1-3 digit octets.
 if printf '%s' "$domain" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
   echo "add-domain: '$domain' — IP-адрес, не домен. Используй bin/add-ip.sh" >&2
   exit 13
 fi
 
-# Must contain at least one dot (TLD requirement).
 case "$domain" in
   *.*) : ;;
   *) echo "add-domain: '$domain' не содержит точки (нужен FQDN)" >&2; exit 13 ;;
 esac
 
-# Outbound tag shape: alphanumeric + _- only, max 32 chars (defense in depth
-# even though V1 only accepts a fixed value).
 if ! printf '%s' "$outbound" | grep -qE '^[a-zA-Z0-9_-]{1,32}$'; then
   echo "add-domain: невалидный --outbound '$outbound' (только [A-Za-z0-9_-], max 32)" >&2
   exit 13
 fi
 
-# --- Resolve router + SSH alive ------------------------------------------------
-# Done BEFORE the "auto-failover only" gate so an unreachable-host error
-# (exit 2) takes precedence over the V1-scope refusal (exit 13). Without this
-# ordering, a CI mock against a fake router would fail with the wrong code.
+# --- Resolve router + SSH alive -----------------------------------------------
 resolve_router_config "$router"
 
 if ! ssh_check_alive 5; then
@@ -128,30 +130,39 @@ EOF
   exit 2
 fi
 
-# V1 scope decision: this script ONLY supports the default auto-failover
-# outbound. Per-tag pinning (rule-set /etc/sing-box/rules/pin-<tag>.json plus
-# a matching route.rules entry in config.json) is planned for V1.1 but not
-# yet implemented. Failing fast prevents the outbound-blind idempotency bug
-# where requesting --outbound foo silently added the domain to the auto-
-# failover rule-set anyway.
-if [ "$outbound" != "auto-failover" ]; then
-  cat >&2 <<EOF
-add-domain: V1 поддерживает только --outbound auto-failover.
-Per-tag pinning (например, --outbound vpn-de или --outbound proxy-ru) запланирован
-на V1.1: он требует отдельного rule_set /etc/sing-box/rules/pin-${outbound}.json
-+ соответствующего route.rules в /etc/sing-box/config.json. Сейчас этот путь
-не реализован, и я отказываюсь делать вид, что он работает.
+# --- Compute rule-set file and tag based on outbound -------------------------
+REMOTE_CONFIG="/etc/sing-box/config.json"
+REMOTE_CONFIG_NEW="/tmp/openwrt-skill-config-new.json"
 
-Workaround: добавь домен в auto-failover (--outbound auto-failover — это default),
-или открой задачу на pinning в memory/<alias>/decisions.md.
-EOF
+if [ "$outbound" = "auto-failover" ]; then
+  REMOTE_RULESET="/etc/sing-box/rules/vpn-domains.json"
+  RULESET_TAG="vpn-domains"
+else
+  REMOTE_RULESET="/etc/sing-box/rules/user-${outbound}-domains.json"
+  RULESET_TAG="user-${outbound}"
+fi
+
+REMOTE_NEW="/tmp/openwrt-skill-vpn-domains-new.json"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "add-domain: локально нужен jq (brew install jq)" >&2
   exit 13
 fi
 
-# Make sure memory exists so we can journal afterwards.
+# For non-auto-failover outbounds, verify the outbound tag exists in config.
+if [ "$outbound" != "auto-failover" ]; then
+  if ! ssh_run "jq -e --arg t '$outbound' '.outbounds[]? | select(.tag == \$t)' $REMOTE_CONFIG >/dev/null 2>&1"; then
+    cat >&2 <<EOF
+add-domain: outbound '$outbound' не найден в config.json.
+Добавь VPN-ноду сначала через bin/add-vpn.sh, затем повтори.
+EOF
+    exit 13
+  fi
+fi
+
 render_first_time_memory "$ROUTER_ALIAS" "$ROUTER_HOST"
 
-# --- Temp files (clean up on exit) --------------------------------------------
+# --- Temp files ---------------------------------------------------------------
 TMP_LOCAL="$(mktemp -t openwrt-skill-rule.XXXXXX)"
 TMP_LOCAL_NEW="$(mktemp -t openwrt-skill-rule.XXXXXX)"
 TMP_CONFIG="$(mktemp -t openwrt-skill-config.XXXXXX)"
@@ -159,9 +170,9 @@ TMP_CONFIG_NEW="$(mktemp -t openwrt-skill-config-new.XXXXXX)"
 cleanup() {
   rm -f "$TMP_LOCAL" "$TMP_LOCAL_NEW" "$TMP_CONFIG" "$TMP_CONFIG_NEW" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+trap 'cleanup; ssh_run "rm -f $REMOTE_NEW $REMOTE_CONFIG_NEW" >/dev/null 2>&1 || true' EXIT INT TERM
 
-# --- Step 1: pre-backup (capture snapshot id) ----------------------------------
+# --- Step 1: pre-backup -------------------------------------------------------
 snapshot_id=""
 if [ "$no_backup" = "1" ]; then
   echo "add-domain: ⚠ --no-backup — пропускаю pre-backup. Используй только в тестах!" >&2
@@ -173,11 +184,10 @@ else
   fi
 fi
 
-# Helper: restore from snapshot in case anything fails after we changed files.
 rollback_now() {
   local reason="$1"
   if [ -z "$snapshot_id" ]; then
-    echo "add-domain: $reason; но snapshot_id пуст (--no-backup), ручной откат" >&2
+    echo "add-domain: $reason; snapshot_id пуст (--no-backup), ручной откат" >&2
     return 1
   fi
   echo "add-domain: $reason — восстанавливаю снимок $snapshot_id" >&2
@@ -191,18 +201,11 @@ tar -xzf \"\$TAR\" -C /
   }
 }
 
-# --- Step 2: pull current rule-set (or seed empty v3) -------------------------
-REMOTE_RULESET="/etc/sing-box/rules/vpn-domains.json"
-REMOTE_NEW="/tmp/openwrt-skill-vpn-domains-new.json"
-REMOTE_CONFIG="/etc/sing-box/config.json"
-REMOTE_CONFIG_NEW="/tmp/openwrt-skill-config-new.json"
+# --- ensure_auto_failover_route: wire vpn-domains into auto-failover rule ----
+# (original ensure_vpn_domains_route logic, unchanged)
 config_route_changed=0
 
-trap 'cleanup; ssh_run "rm -f $REMOTE_NEW $REMOTE_CONFIG_NEW" >/dev/null 2>&1 || true' EXIT INT TERM
-
-ensure_vpn_domains_route() {
-  # Current managed router configs may already route user-vpn to auto-failover
-  # but miss the local vpn-domains rule-set that this script writes.
+ensure_auto_failover_route() {
   if ssh_run "jq -e '
     any(.route.rule_set[]?; .tag == \"vpn-domains\" and .path == \"$REMOTE_RULESET\")
     and any(.route.rules[]?; .outbound == \"auto-failover\" and ((.rule_set // []) | index(\"vpn-domains\")))
@@ -251,14 +254,81 @@ mv -f $REMOTE_CONFIG_NEW $REMOTE_CONFIG
   config_route_changed=1
 }
 
-# Use grep -q over ssh_run to detect presence robustly.
+# --- ensure_tag_route: wire user-<tag>-domains into per-tag route ------------
+ensure_tag_route() {
+  if ! scp_from "$REMOTE_CONFIG" "$TMP_CONFIG" >/dev/null 2>&1; then
+    echo "add-domain: не могу скачать $REMOTE_CONFIG" >&2
+    return 1
+  fi
+
+  # Check if already fully wired (rule_set entry + dns fakeip + route rule).
+  if jq -e --arg tag "$RULESET_TAG" --arg path "$REMOTE_RULESET" --arg out "$outbound" '
+    any(.route.rule_set[]?; .tag == $tag and .path == $path)
+    and ((.dns.rules // []) | any(.server == "fakeip-dns" and ((.rule_set // []) | any(. == $tag))))
+    and any(.route.rules[]?; ((.rule_set // []) | any(. == $tag)) and .outbound == $out)
+  ' "$TMP_CONFIG" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Wire rule_set entry + dns fakeip + route rule.
+  jq --arg tag "$RULESET_TAG" --arg path "$REMOTE_RULESET" --arg out "$outbound" '
+    .route.rule_set = ((.route.rule_set // []) as $rs
+      | if any($rs[]?; .tag == $tag) then $rs
+        else $rs + [{"type":"local","tag":$tag,"format":"source","path":$path}]
+        end)
+    | .dns.rules = ((.dns.rules // []) | map(
+        if .server == "fakeip-dns" then
+          .rule_set = ((.rule_set // []) + [$tag] | unique | sort)
+        else . end
+      ))
+    | if any(.route.rules[]?; ((.rule_set // []) | any(. == $tag)) and .outbound == $out)
+      then .
+      else
+        .route.rules = (
+          (.route.rules // []) | to_entries |
+          (map(select(.value.outbound == "auto-failover")) | .[0].key // -1) as $idx |
+          if $idx >= 0 then
+            (.[:$idx] | map(.value))
+            + [{"inbound":"tproxy-in","rule_set":[$tag],"outbound":$out}]
+            + (.[$idx:] | map(.value))
+          else
+            map(.value) + [{"inbound":"tproxy-in","rule_set":[$tag],"outbound":$out}]
+          end
+        )
+      end
+  ' "$TMP_CONFIG" > "$TMP_CONFIG_NEW"
+
+  if ! scp_to "$TMP_CONFIG_NEW" "$REMOTE_CONFIG_NEW" >/dev/null 2>&1; then
+    echo "add-domain: scp в $REMOTE_CONFIG_NEW не удался" >&2
+    return 1
+  fi
+
+  if ! ssh_run "set -eu
+sing-box check -c $REMOTE_CONFIG_NEW >/dev/null
+mv -f $REMOTE_CONFIG_NEW $REMOTE_CONFIG
+" >/dev/null 2>&1; then
+    echo "add-domain: sing-box check отверг config с новым маршрутом для $RULESET_TAG" >&2
+    return 1
+  fi
+
+  config_route_changed=1
+}
+
+ensure_outbound_route() {
+  if [ "$outbound" = "auto-failover" ]; then
+    ensure_auto_failover_route
+  else
+    ensure_tag_route
+  fi
+}
+
+# --- Step 2: pull current rule-set (or seed empty v3) ------------------------
 if ssh_run "test -f $REMOTE_RULESET" >/dev/null 2>&1; then
   if ! scp_from "$REMOTE_RULESET" "$TMP_LOCAL" >/dev/null 2>&1; then
     echo "add-domain: не могу скачать $REMOTE_RULESET" >&2
     exit 2
   fi
 else
-  # Seed minimal rule_set v3.
   cat > "$TMP_LOCAL" <<'SEED'
 {
   "version": 3,
@@ -271,32 +341,21 @@ else
 SEED
 fi
 
-# Local validation: must parse as JSON.
-if ! command -v jq >/dev/null 2>&1; then
-  echo "add-domain: локально нужен jq (brew install jq)" >&2
-  exit 13
-fi
-
 if ! jq -e '.' "$TMP_LOCAL" >/dev/null 2>&1; then
   echo "add-domain: $REMOTE_RULESET не валидный JSON, отказываюсь" >&2
   exit 13
 fi
 
-# Idempotency check + merge via jq.
-# V1 only operates on /etc/sing-box/rules/vpn-domains.json (auto-failover).
-# The (domain, outbound) idempotency key collapses to just `domain` here —
-# we're guaranteed by the validation above that outbound == "auto-failover".
-# When V1.1 adds per-tag pin-<tag>.json files, this script will need to
-# select the correct rule_set path and re-check idempotency there.
-already_present="$(jq --arg d "$domain" '
-  (.rules // []) as $r
-  | [ $r[]?.domain_suffix // [] ] | add // []
-  | index($d) != null
-' "$TMP_LOCAL")"
+# Idempotency check via grep (works for JSONC too).
+if grep -qF "\"$domain\"" "$TMP_LOCAL" 2>/dev/null; then
+  already_present="true"
+else
+  already_present="false"
+fi
 
 if [ "$already_present" = "true" ]; then
-  if ! ensure_vpn_domains_route; then
-    rollback_now "vpn-domains route binding failed"
+  if ! ensure_outbound_route; then
+    rollback_now "outbound route binding failed"
     exit 20
   fi
 
@@ -311,16 +370,14 @@ if [ "$already_present" = "true" ]; then
   cat >&2 <<EOF
 add-domain: домен '$domain' уже в rule-set'е — ничего не меняю.
 EOF
-  # Idempotent: do not journal duplicate, just exit 0.
   exit 0
 fi
 
-# Merge: if rules[] is empty or no rule has domain_suffix, create one.
+# Merge: add domain to first rule with domain_suffix (plain JSON only).
 jq --arg d "$domain" '
   if (.rules | length) == 0 then
     .rules = [{"domain_suffix": [$d]}]
   else
-    # Find the index of the first rule that has domain_suffix.
     (
       [ .rules | to_entries[] | select(.value.domain_suffix != null) | .key ] as $idxs
       | if ($idxs | length) > 0 then
@@ -338,43 +395,36 @@ if ! jq -e '.' "$TMP_LOCAL_NEW" >/dev/null 2>&1; then
   exit 13
 fi
 
-# --- Step 3: push to /tmp, validate via sing-box, atomic mv -------------------
+# --- Step 3: push to /tmp, validate via sing-box, atomic mv ------------------
 if ! scp_to "$TMP_LOCAL_NEW" "$REMOTE_NEW" >/dev/null 2>&1; then
   echo "add-domain: scp в $REMOTE_NEW не удался" >&2
   exit 2
 fi
 
-# Validate v3 schema via sing-box.
 if ! ssh_run "sing-box rule-set format $REMOTE_NEW >/dev/null" 2>&1; then
   echo "add-domain: sing-box rule-set format отверг новый файл — откатываю" >&2
   rollback_now "невалидный rule-set"
   exit 20
 fi
 
-# Atomic mv into place. NB: literal path, not $(dirname …) — the latter
-# would expand on the AGENT side, not on the router (cosmetic but misleading
-# in case REMOTE_RULESET ever changes).
 if ! ssh_run "mkdir -p /etc/sing-box/rules && mv -f $REMOTE_NEW $REMOTE_RULESET" >/dev/null 2>&1; then
   echo "add-domain: не смог переместить rule-set на месте — откатываю" >&2
   rollback_now "mv failed"
   exit 20
 fi
 
-if ! ensure_vpn_domains_route; then
-  echo "add-domain: не смог привязать vpn-domains к auto-failover — откатываю" >&2
-  rollback_now "vpn-domains route binding failed"
+if ! ensure_outbound_route; then
+  echo "add-domain: не смог привязать $RULESET_TAG к $outbound — откатываю" >&2
+  rollback_now "outbound route binding failed"
   exit 20
 fi
 
-# Full config check.
 if ! ssh_run "sing-box check -c /etc/sing-box/config.json" >/dev/null 2>&1; then
   echo "add-domain: sing-box check отверг config после изменения — откатываю" >&2
   rollback_now "sing-box check failed"
   exit 20
 fi
 
-# Hot reload trick: sing-box re-reads local rule_set on file change. Confirm
-# sing-box is alive; if not, attempt a controlled reload (NOT restart).
 if [ "$config_route_changed" = "1" ]; then
   ssh_run "/etc/init.d/sing-box-tproxy reload >/dev/null 2>&1 || /etc/init.d/sing-box-tproxy restart" >/dev/null 2>&1 || {
     echo "add-domain: config изменён, но reload не помог — откатываю" >&2
@@ -389,7 +439,7 @@ elif ! ssh_run "pgrep -x sing-box >/dev/null" >/dev/null 2>&1; then
   }
 fi
 
-# --- Step 4: update memory/<alias>/domains.md (defensive) ---------------------
+# --- Step 4: update memory/<alias>/domains.md --------------------------------
 DOMAINS_MD="$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/domains.md"
 iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 new_row="| $domain | $outbound | $iso | claude-code |"
@@ -398,41 +448,25 @@ if [ ! -f "$DOMAINS_MD" ]; then
   echo "add-domain: $DOMAINS_MD отсутствует — запусти doctor.sh" >&2
 else
   if grep -qF '{{DOMAIN_TABLE_ROWS}}' "$DOMAINS_MD"; then
-    # Just-initialised template: replace placeholder with new row + placeholder
-    # (so the next add appends correctly above the placeholder).
     tmp_md="$(mktemp -t openwrt-skill-domains.XXXXXX)"
     awk -v row="$new_row" '
-      /\{\{DOMAIN_TABLE_ROWS\}\}/ {
-        print row
-        print
-        next
-      }
+      /\{\{DOMAIN_TABLE_ROWS\}\}/ { print row; print; next }
       { print }
     ' "$DOMAINS_MD" > "$tmp_md"
     mv "$tmp_md" "$DOMAINS_MD"
   elif grep -qF "_(пока пусто — добавь через bin/add-domain.sh)_" "$DOMAINS_MD"; then
-    # Rendered template's "empty" placeholder.
     tmp_md="$(mktemp -t openwrt-skill-domains.XXXXXX)"
     awk -v row="$new_row" '
-      /_\(пока пусто — добавь через bin\/add-domain\.sh\)_/ {
-        print row
-        next
-      }
+      /_\(пока пусто — добавь через bin\/add-domain\.sh\)_/ { print row; next }
       { print }
     ' "$DOMAINS_MD" > "$tmp_md"
     mv "$tmp_md" "$DOMAINS_MD"
   else
-    # Has real rows. Insert after the last row of the markdown table.
-    # A table row starts with "| " and contains "|"; we want to append after
-    # the last consecutive row in the "Активные правила" table.
     tmp_md="$(mktemp -t openwrt-skill-domains.XXXXXX)"
     awk -v row="$new_row" '
       BEGIN { in_table = 0; inserted = 0 }
-      # Detect entering the table by separator row "|---|---|...".
       /^\|[[:space:]]*-+/ { in_table = 1; print; next }
-      # Table row.
       in_table == 1 && /^\|/ { last_table_line = NR; print; next }
-      # First non-table line after entering table — insert before it.
       in_table == 1 && !/^\|/ && inserted == 0 {
         print row
         inserted = 1
@@ -441,9 +475,7 @@ else
         next
       }
       { print }
-      END {
-        if (in_table == 1 && inserted == 0) print row
-      }
+      END { if (in_table == 1 && inserted == 0) print row }
     ' "$DOMAINS_MD" > "$tmp_md"
     mv "$tmp_md" "$DOMAINS_MD"
   fi
@@ -462,8 +494,8 @@ add-domain: готово.
   router:    $ROUTER_ALIAS
   domain:    $domain
   outbound:  $outbound
+  rule-set:  $REMOTE_RULESET (tag: $RULESET_TAG)
   snapshot:  ${snapshot_id:-(skipped)}
-  rule-set:  $REMOTE_RULESET (validated + hot-reloaded)
 EOF
 
 exit 0
