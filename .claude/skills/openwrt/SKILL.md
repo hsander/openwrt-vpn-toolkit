@@ -45,6 +45,7 @@ bin/                   # ← safe API. Каждый скрипт — атома�
   remove-proxy.sh
   add-ip.sh            # add IP/CIDR в proxy_subnets nft-set (общий, через --via auto). Per-tag pin TBD.
   pin-device.sh        # pin LAN-устройства/CIDR на конкретный outbound (route.rules + nft tproxy).
+  unpin-device.sh      # снять pin LAN-устройства (обратная операция pin-device.sh).
   backup-now.sh        # snapshot of /etc/sing-box, init.d/*, /etc/config, watchdogs
   snapshot-list.sh
   restore.sh           # staged-apply из snapshot
@@ -109,7 +110,7 @@ openwrt/               # файлы, которые ставятся НА роу
 - vmess/trojan/shadowsocks — парсер только под `vless://`.
 - IPv6 для `add-ip.sh` — TBD (V1 поддерживает только IPv4).
 - Per-tag pinning для `add-ip.sh` (`--via <tag>`) — TBD; работает только `--via auto`.
-- `remove-ip.sh` / `unpin-device.sh` — TBD; откат — через `bin/raw-ssh.sh` либо `bin/restore.sh --snapshot <id>`.
+- `remove-ip.sh` — TBD; откат — через `bin/raw-ssh.sh` либо `bin/restore.sh --snapshot <id>`.
 - Multi-router fleet операции (всё всегда per-`--router`).
 - Реконсиляция `domains.md`/`vpns.md`/`proxies.md` после `restore` или после `raw-ssh` — память остаётся «stale-with-warning».
 - Geo-листы доменов (RU/CN/etc) — `add-domain` принимает только одиночные домены.
