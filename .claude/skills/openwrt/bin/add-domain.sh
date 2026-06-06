@@ -45,6 +45,8 @@ export OPENWRT_SKILL_MEMORY="${OPENWRT_SKILL_MEMORY:-$OPENWRT_SKILL_HOME/memory}
 . "$SKILL_HOME/lib/router-config.sh"
 # shellcheck source=../lib/ssh-runner.sh
 . "$SKILL_HOME/lib/ssh-runner.sh"
+# shellcheck source=../lib/country-resolve.sh
+. "$SKILL_HOME/lib/country-resolve.sh"
 # shellcheck source=../lib/memory-journal.sh
 . "$SKILL_HOME/lib/memory-journal.sh"
 # shellcheck source=../lib/template-render.sh
@@ -88,6 +90,9 @@ done
 
 [ -z "$router" ] && { echo "add-domain: --router обязателен" >&2; usage; }
 [ -z "$domain" ] && { echo "add-domain: --domain обязателен" >&2; usage; }
+
+# --- Resolve country alias to pool tag (usa → usa-pool, pl → pl-pool, etc.) --
+outbound="$(resolve_country_to_pool "$router" "$outbound")"
 
 # --- Validate domain shape ----------------------------------------------------
 if printf '%s' "$domain" | grep -qE 'vless://|^[a-z]+://'; then

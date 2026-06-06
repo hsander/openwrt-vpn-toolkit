@@ -46,6 +46,8 @@ export OPENWRT_SKILL_MEMORY="${OPENWRT_SKILL_MEMORY:-$OPENWRT_SKILL_HOME/memory}
 . "$SKILL_HOME/lib/router-config.sh"
 # shellcheck source=../lib/ssh-runner.sh
 . "$SKILL_HOME/lib/ssh-runner.sh"
+# shellcheck source=../lib/country-resolve.sh
+. "$SKILL_HOME/lib/country-resolve.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -116,6 +118,9 @@ say() { [ "$quiet" = "1" ] || echo "pin-device: $*" >&2; }
 # ---------------------------------------------------------------------------
 [ -z "$router" ]   && { echo "pin-device: --router обязателен" >&2; usage; }
 [ -z "$outbound" ] && { echo "pin-device: --outbound обязателен" >&2; usage; }
+
+# --- Resolve country alias to pool tag (usa → usa-pool, etc.) ----------------
+outbound="$(resolve_country_to_pool "$router" "$outbound")"
 
 # Mutually exclusive: exactly one of --source-ip / --source-cidr.
 if [ -n "$source_ip" ] && [ -n "$source_cidr" ]; then
