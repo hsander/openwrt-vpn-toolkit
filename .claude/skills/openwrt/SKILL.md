@@ -98,7 +98,9 @@ openwrt/               # файлы, которые ставятся НА роу
 
 **Поддержано:**
 - VLESS Reality outbounds (только эта схема URL).
-- `add-domain` с `--outbound auto-failover` (→ `vpn-domains.json`) и с `--outbound <tag>` (→ `user-<tag>-domains.json`, файл + маршрут создаются автоматически; outbound должен уже быть в config.json).
+- **Country-pool routing**: `--outbound usa` / `--outbound pl` / `--outbound sg` резолвится в `usa-pool` / `pl-pool` / `sg-pool` через `lib/country-resolve.sh` + `memory/<alias>/countries.yaml`. Работает в `add-domain`, `add-proxy`, `pin-device`. `auto-failover` = urltest над пулами.
+- `add-vpn --country <code>` — новая нода идёт в pool страны (создаёт pool если нет), а не в `auto-failover` напрямую.
+- `add-domain` с `--outbound auto-failover` (→ `vpn-domains.json`) и с `--outbound <tag|страна>` (→ `user-<tag>-domains.json`, файл + маршрут создаются автоматически).
 - `remove-domain` сканирует все `*.json` в `/etc/sing-box/rules/` — работает для любого rule-set файла, включая JSONC с `//`-комментариями.
 - LAN proxy на mixed-inbound портах 4000-4099.
 - `add-ip.sh` — IPv4-адреса/CIDR в общий nft-сет `proxy_subnets` (`--via auto`, без per-tag pin).
@@ -129,10 +131,10 @@ openwrt/               # файлы, которые ставятся НА роу
 ## Поток "добавить домен"
 
 ```
-bin/add-domain.sh --router <alias> --domain <domain> [--outbound <tag>]
+bin/add-domain.sh --router <alias> --domain <domain> [--outbound <tag|страна>]
 ```
 
-`--outbound` по умолчанию = `auto-failover`. Поддерживает любой существующий outbound-tag:
+`--outbound` по умолчанию = `auto-failover`. Поддерживает страну (`usa`, `pl`, `sg`) и любой outbound-tag:
 
 | `--outbound` | rule-set файл | config.json |
 |---|---|---|
@@ -221,7 +223,39 @@ bin/raw-ssh.sh --router <alias>
 - `06-adopt-existing.md` — адоптировать ранее настроенный роутер
 - `07-add-ip.md` — завернуть IP/CIDR в VPN (proxy_subnets nft-set)
 - `08-pin-device.md` — pin LAN-устройства на конкретный outbound
+- `09-country-pools.md` — страны как единица маршрутизации (usa-pool, pl-pool, sg-pool)
 - `99-escape-hatch.md` — когда и как использовать `raw-ssh.sh`
+
+## Country-pool routing
+
+Страна — основная единица маршрутизации. Ноды одной страны объединяются в urltest-пул, `auto-failover` работает над пулами.
+
+```
+memory/<alias>/countries.yaml   # реестр: country → pool → nodes
+lib/country-resolve.sh          # resolve_country_to_pool home usa → usa-pool
+```
+
+**Текущие пулы (home):**
+
+| Страна | Pool tag | Ноды |
+|--------|----------|------|
+| usa | usa-pool | usa-4, usa-6-dev, usa-4-crip |
+| pl | pl-pool | polsha |
+| sg | sg-pool | redshield-sg |
+
+**Алиасы:** `us` → usa, `poland` → pl, `polsha` → pl, `singapore` → sg.
+
+**Использование:**
+```bash
+bin/add-domain.sh --router home --domain example.com --outbound usa
+bin/pin-device.sh --router home --source-ip 192.168.1.x --outbound usa
+bin/add-proxy.sh  --router home --port 4010 --outbound usa
+bin/add-vpn.sh    --router home --url "vless://..." --country usa
+```
+
+`--outbound usa-4` (конкретная нода) по-прежнему работает — backward-compat.
+
+Подробнее: `runbooks/09-country-pools.md`.
 
 ## References (для архитектурного контекста)
 
