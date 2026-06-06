@@ -36,6 +36,8 @@ export OPENWRT_SKILL_MEMORY="${OPENWRT_SKILL_MEMORY:-$OPENWRT_SKILL_HOME/memory}
 . "$SKILL_HOME/lib/ssh-runner.sh"
 # shellcheck source=../lib/memory-journal.sh
 . "$SKILL_HOME/lib/memory-journal.sh"
+# shellcheck source=../lib/country-resolve.sh
+. "$SKILL_HOME/lib/country-resolve.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -63,6 +65,7 @@ url=""
 tag=""
 proxy_port=""
 add_to_failover=1
+country=""
 no_backup=0
 force=0
 
@@ -71,6 +74,7 @@ while [ $# -gt 0 ]; do
     --router) router="${2:-}"; shift 2 ;;
     --url) url="${2:-}"; shift 2 ;;
     --tag) tag="${2:-}"; shift 2 ;;
+    --country) country="${2:-}"; shift 2 ;;
     --add-proxy-port) proxy_port="${2:-}"; shift 2 ;;
     --add-to-failover) add_to_failover=1; shift ;;
     --no-add-to-failover) add_to_failover=0; shift ;;
@@ -359,6 +363,16 @@ rollback_inline() {
 # ---------------------------------------------------------------------------
 # We pass secrets to jq via --arg (which is safe — jq just reads argv, doesn't
 # log). Output goes to local tmpfile, never to stdout.
+# Resolve --country to pool tag (e.g. usa → usa-pool).
+pool_tag=""
+if [ -n "$country" ]; then
+  pool_tag="$(resolve_country_to_pool "$ROUTER_ALIAS" "$country")"
+  # If resolve returned input unchanged and it looks like a bare country code, warn.
+  if [ "$pool_tag" = "$country" ] && ! printf '%s' "$country" | grep -qE 'pool$'; then
+    echo "add-vpn: --country '$country' не найден в countries.yaml; pool не будет обновлён" >&2
+  fi
+fi
+
 jq_failed=0
 jq \
   --arg tag "$tag" \
@@ -372,6 +386,7 @@ jq \
   --arg sid "$v_sid" \
   --argjson add_failover "$add_to_failover" \
   --arg proxy_port_str "$proxy_port" \
+  --arg pool_tag "$pool_tag" \
   '
     # Remove any pre-existing outbound with the same tag (force/idempotent).
     .outbounds = ((.outbounds // []) | map(select((.tag // "") != $tag)))
@@ -392,13 +407,42 @@ jq \
         }
       }]
 
-    # Add to auto-failover.outbounds if requested and the urltest exists.
-    | (if $add_failover == 1 then
+    # Add to auto-failover.outbounds if requested AND no pool is being used.
+    # When --country is given, the node goes into the pool; the pool is in auto-failover.
+    | (if ($add_failover == 1) and (($pool_tag | length) == 0) then
          .outbounds = (.outbounds | map(
            if (.type == "urltest" and .tag == "auto-failover") then
              .outbounds = ((.outbounds // []) + [$tag] | unique)
            else . end
          ))
+       else . end)
+
+    # Add to country pool if --country was given.
+    | (if ($pool_tag | length) > 0 then
+         if any(.outbounds[]?; .tag == $pool_tag) then
+           # Pool exists: append node tag to its outbounds
+           .outbounds = (.outbounds | map(
+             if (.type == "urltest" and .tag == $pool_tag) then
+               .outbounds = ((.outbounds // []) + [$tag] | unique)
+             else . end
+           ))
+         else
+           # Pool does not exist yet: create it
+           .outbounds = (.outbounds + [{
+             "type": "urltest",
+             "tag": $pool_tag,
+             "outbounds": [$tag],
+             "url": "https://www.gstatic.com/generate_204",
+             "interval": "3m",
+             "tolerance": 500
+           }])
+           # Also add pool to auto-failover if it exists
+           | .outbounds = (.outbounds | map(
+               if (.type == "urltest" and .tag == "auto-failover") then
+                 .outbounds = ((.outbounds // []) + [$pool_tag] | unique)
+               else . end
+             ))
+         end
        else . end)
 
     # Optional mixed inbound + route rule.

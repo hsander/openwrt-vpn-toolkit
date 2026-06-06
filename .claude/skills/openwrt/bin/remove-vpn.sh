@@ -135,6 +135,22 @@ if [ -n "$failover_outbounds" ] && [ "$force_orphan" != "1" ]; then
   fi
 fi
 
+# Check that no country-pool urltest would become empty after removal (unless --force-orphan).
+if [ "$force_orphan" != "1" ]; then
+  empty_pool="$(jq -r --arg t "$tag" '
+    .outbounds[]? |
+    select(.type == "urltest" and .tag != "auto-failover") |
+    select((.outbounds // []) | any(. == $t)) |
+    select(((.outbounds // []) | map(select(. != $t)) | length) == 0) |
+    .tag
+  ' "$local_cfg" 2>/dev/null || true)"
+  if [ -n "$empty_pool" ]; then
+    echo "remove-vpn: удаление '$tag' опустошит pool '$empty_pool' — отказ" >&2
+    echo "  Сначала добавь другую ноду в pool или используй --force-orphan." >&2
+    exit 13
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Pre-backup
 # ---------------------------------------------------------------------------
@@ -191,14 +207,23 @@ EOF
 fi
 
 jq_failed=0
-jq --arg t "$tag" '
+jq --arg t "$tag" --arg force_orphan "$force_orphan" '
   .outbounds = ((.outbounds // []) | map(select((.tag // "") != $t)))
 
+  # Step A: remove tag from ALL urltest groups (not just auto-failover)
   | .outbounds = (.outbounds | map(
-      if (.type == "urltest" and .tag == "auto-failover") then
+      if .type == "urltest" then
         .outbounds = ((.outbounds // []) | map(select(. != $t)))
       else . end
     ))
+
+  # Step B: if --force-orphan, remove urltest outbounds whose .outbounds became empty
+  | if $force_orphan == "1" then
+      .outbounds = (.outbounds | map(select(
+        if .type == "urltest" then (.outbounds // [] | length) > 0
+        else true end
+      )))
+    else . end
 
   | (
       # collect inbound tags to drop (those used by route rules with outbound=$t)
