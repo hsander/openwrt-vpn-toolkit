@@ -125,6 +125,7 @@ The VPN stack:
 │   ├── setup-ssh.sh  # First-time SSH key setup
 │   ├── install-vpn.sh# Full VPN bootstrap (parses vless://)
 │   ├── add-domain.sh # Add domain to VPN bypass list
+│   ├── set-rule-set-outbound.sh # Move existing service rule_set to another outbound
 │   ├── add-vpn.sh    # Add VPN server node
 │   ├── pin-device.sh # Pin LAN device to specific server
 │   ├── add-ip.sh     # Add IP subnet route

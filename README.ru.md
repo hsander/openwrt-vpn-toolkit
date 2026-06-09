@@ -133,6 +133,7 @@ claude .
 │   ├── setup-ssh.sh   # Первичная настройка SSH-ключа
 │   ├── install-vpn.sh # Полный VPN-bootstrap (парсит vless://)
 │   ├── add-domain.sh  # Добавить домен в список обхода
+│   ├── set-rule-set-outbound.sh # Переключить сервисный rule_set на другой outbound
 │   ├── add-vpn.sh     # Добавить VPN-ноду
 │   ├── pin-device.sh  # Прибить устройство к конкретному серверу
 │   ├── add-ip.sh      # Добавить IP-маршрут

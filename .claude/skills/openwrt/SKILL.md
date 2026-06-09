@@ -39,6 +39,7 @@ bin/                   # ← safe API. Каждый скрипт — атома�
   adopt.sh             # уже настроенный роутер → snapshot + probe + рендер memory (read-only)
   add-domain.sh        # → rules/vpn-domains.json (auto-failover) или rules/user-<tag>-domains.json (per-tag), validate, hot reload
   remove-domain.sh
+  set-rule-set-outbound.sh # сменить outbound у существующего route.rules rule_set (например telegram/tg-pin)
   add-vpn.sh           # outbound + auto-failover + zapret vpn_servers set
   remove-vpn.sh
   add-proxy.sh         # mixed-inbound :400X + route rule
@@ -102,6 +103,7 @@ openwrt/               # файлы, которые ставятся НА роу
 - `add-vpn --country <code>` — новая нода идёт в pool страны (создаёт pool если нет), а не в `auto-failover` напрямую.
 - `add-domain` с `--outbound auto-failover` (→ `vpn-domains.json`) и с `--outbound <tag|страна>` (→ `user-<tag>-domains.json`, файл + маршрут создаются автоматически).
 - `remove-domain` сканирует все `*.json` в `/etc/sing-box/rules/` — работает для любого rule-set файла, включая JSONC с `//`-комментариями.
+- `set-rule-set-outbound.sh` — меняет outbound у уже существующего `route.rules` rule-set без ручного редактирования `config.json`; нужен для сервисных rule-set'ов (`telegram`, `tg-pin`, `spotify-usa`, etc.), которые могут перекрывать новые доменные правила.
 - LAN proxy на mixed-inbound портах 4000-4099.
 - `add-ip.sh` — IPv4-адреса/CIDR в общий nft-сет `proxy_subnets` (`--via auto`, без per-tag pin).
 - `pin-device.sh` — pin LAN-устройства (source-ip/CIDR) на конкретный outbound через `route.rules` + nft tproxy.
@@ -152,6 +154,16 @@ Outbound `<tag>` должен уже существовать в `config.json` (
 6. `memory/<alias>/domains.md` и `journal.md` обновлены.
 
 Если exit ≠ 0 — snapshot уже восстановлен. Прочитай stderr и сообщи пользователю.
+
+## Поток "переключить существующий rule-set на другой outbound"
+
+```
+bin/set-rule-set-outbound.sh --router <alias> --rule-set <rule_set_tag> --outbound <tag|pool>
+```
+
+Используй, когда пользователь просит переключить уже настроенный сервис/набор правил на другой сервер/страну: например «переключи Telegram на Польшу». Сначала проверь `doctor.sh` и `state.md`: если нужный домен уже попадает в более ранний rule-set (`telegram`, `tg-pin`, `spotify-usa`, etc.), обычный `add-domain.sh` не изменит реальный маршрут — нужно менять outbound у самого `route.rules` rule-set.
+
+Скрипт делает snapshot, проверяет наличие outbound, скачивает `config.json`, меняет только правила с указанным `rule_set`, валидирует что количество `route.rules` не изменилось, запускает `sing-box check`, применяет конфиг и hot-reload. После exit 0 всегда запускай `bin/doctor.sh --router <alias> --json` и проверь `rule_set_outbound_map`.
 
 ## Поток "добавить VPN"
 
