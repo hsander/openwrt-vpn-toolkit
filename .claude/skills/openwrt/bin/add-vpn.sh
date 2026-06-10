@@ -643,7 +643,7 @@ touch "$mem_lock"
     in_fo="no"; [ "$add_to_failover" = "1" ] && in_fo="yes"
     proxy_cell="—"
     [ -n "$proxy_port" ] && proxy_cell="$proxy_port"
-    row="| $tag | vless-reality | $v_host:$v_port | ? | $in_fo | $proxy_cell |"
+    row="| $tag | vless | $v_host:$v_port | ? | $in_fo | $proxy_cell |"
 
     if grep -q '{{VPN_TABLE_ROWS}}' "$vpns_md"; then
       tmp="$(mktemp)"
@@ -657,7 +657,18 @@ touch "$mem_lock"
         END{ if (!done) print r }
       ' "$vpns_md" > "$tmp" && mv "$tmp" "$vpns_md"
     else
-      printf '%s\n' "$row" >> "$vpns_md"
+      tmp="$(mktemp)"
+      awk -v r="$row" 'BEGIN{last=-1}
+        /^\|/ { last=NR }
+        { lines[NR]=$0 }
+        END {
+          for(i=1;i<=NR;i++) {
+            print lines[i]
+            if (i==last) print r
+          }
+          if (last==-1) print r
+        }
+      ' "$vpns_md" > "$tmp" && mv "$tmp" "$vpns_md"
     fi
   fi
 
@@ -675,7 +686,18 @@ touch "$mem_lock"
         END{ if (!done) print r }
       ' "$proxies_md" > "$tmp" && mv "$tmp" "$proxies_md"
     else
-      printf '%s\n' "$prow" >> "$proxies_md"
+      tmp="$(mktemp)"
+      awk -v r="$prow" 'BEGIN{last=-1}
+        /^\|/ { last=NR }
+        { lines[NR]=$0 }
+        END {
+          for(i=1;i<=NR;i++) {
+            print lines[i]
+            if (i==last) print r
+          }
+          if (last==-1) print r
+        }
+      ' "$proxies_md" > "$tmp" && mv "$tmp" "$proxies_md"
     fi
   fi
 } 9>"$mem_lock"

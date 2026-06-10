@@ -425,8 +425,18 @@ if [ -f "$vpns_md" ]; then
       { print }
     ' "$vpns_md" > "$tmp_md" && mv "$tmp_md" "$vpns_md"
   else
-    # Last resort: just append the row at end of file.
-    printf '\n%s\n' "$vpn_row" >> "$vpns_md"
+    tmp_md="$vpns_md.tmp.$$"
+    awk -v row="$vpn_row" 'BEGIN{last=-1}
+      /^\|/ { last=NR }
+      { lines[NR]=$0 }
+      END {
+        for(i=1;i<=NR;i++) {
+          print lines[i]
+          if (i==last) print row
+        }
+        if (last==-1) print row
+      }
+    ' "$vpns_md" > "$tmp_md" && mv "$tmp_md" "$vpns_md"
   fi
 fi
 
@@ -447,7 +457,18 @@ if [ -n "$proxy_port" ]; then
         { print }
       ' "$proxies_md" > "$tmp_md" && mv "$tmp_md" "$proxies_md"
     else
-      printf '\n%s\n' "$proxy_row" >> "$proxies_md"
+      tmp_md="$proxies_md.tmp.$$"
+      awk -v row="$proxy_row" 'BEGIN{last=-1}
+        /^\|/ { last=NR }
+        { lines[NR]=$0 }
+        END {
+          for(i=1;i<=NR;i++) {
+            print lines[i]
+            if (i==last) print row
+          }
+          if (last==-1) print row
+        }
+      ' "$proxies_md" > "$tmp_md" && mv "$tmp_md" "$proxies_md"
     fi
   fi
 fi

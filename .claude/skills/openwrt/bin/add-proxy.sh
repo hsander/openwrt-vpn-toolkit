@@ -278,7 +278,18 @@ touch "$mem_lock"
       tmp="$(mktemp)"
       awk -v r="$prow" 'BEGIN{d=0} { if (!d && $0 ~ /_\(пока пусто/) { print r; d=1 } else { print } } END{ if (!d) print r }' "$proxies_md" > "$tmp" && mv "$tmp" "$proxies_md"
     else
-      printf '%s\n' "$prow" >> "$proxies_md"
+      tmp="$(mktemp)"
+      awk -v r="$prow" 'BEGIN{last=-1}
+        /^\|/ { last=NR }
+        { lines[NR]=$0 }
+        END {
+          for(i=1;i<=NR;i++) {
+            print lines[i]
+            if (i==last) print r
+          }
+          if (last==-1) print r
+        }
+      ' "$proxies_md" > "$tmp" && mv "$tmp" "$proxies_md"
     fi
   fi
 } 9>"$mem_lock"
