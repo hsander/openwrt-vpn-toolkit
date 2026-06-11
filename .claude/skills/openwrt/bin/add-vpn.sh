@@ -38,6 +38,8 @@ export OPENWRT_SKILL_MEMORY="${OPENWRT_SKILL_MEMORY:-$OPENWRT_SKILL_HOME/memory}
 . "$SKILL_HOME/lib/memory-journal.sh"
 # shellcheck source=../lib/country-resolve.sh
 . "$SKILL_HOME/lib/country-resolve.sh"
+# shellcheck source=../lib/watchdog-sync.sh
+. "$SKILL_HOME/lib/watchdog-sync.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -608,6 +610,11 @@ if ! ssh_run "/etc/init.d/sing-box-tproxy status >/dev/null 2>&1 || pgrep -f sin
   rollback_inline
   exit 20
 fi
+
+# ---------------------------------------------------------------------------
+# Sync vpn-nodes-watchdog NODES= list on router
+# ---------------------------------------------------------------------------
+sync_vpn_nodes_watchdog "$ROUTER_ALIAS"
 
 # ---------------------------------------------------------------------------
 # Update memory tables (NO secrets — only tag, host:port, region?, proxy port)
