@@ -133,15 +133,22 @@ tar -xzf \"\$TAR\" -C /
 " >/dev/null 2>&1 || true
 }
 
-# --- Find pin ID from init.d (for state cleanup) ------------------------------
-# The nft comment pattern is vpn-kit-pin-<hash>
-pin_id="$(ssh_run "grep -oE 'vpn-kit-pin-[a-f0-9]+' $REMOTE_INITD 2>/dev/null | head -1" 2>/dev/null || true)"
+# --- Find pin ID for THIS source (for state cleanup) --------------------------
+# The nft comment pattern is vpn-kit-pin-<hash>. We MUST match the pin belonging
+# to this exact source IP — NOT just the first pin in the file. The bare IP (no
+# /32) is what appears on the init.d rule line.
+bare_ip="${cidr%/*}"
 
-# Find all pin IDs that correspond to this CIDR via install-state
-if ssh_run "test -f $REMOTE_STATE" >/dev/null 2>&1; then
-  pin_id="$(ssh_run "jq -r --arg c '$cidr' \
+# Primary: the pin-id on the init.d nft rule line that carries this source IP.
+pin_id="$(ssh_run "grep -F '$bare_ip' $REMOTE_INITD 2>/dev/null | grep -oE 'vpn-kit-pin-[a-f0-9]+' | head -1" 2>/dev/null || true)"
+
+# Fallback: install-state lookup by source CIDR. Only override when it actually
+# returns a value — otherwise we'd clobber a good init.d match with empty.
+if [ -z "$pin_id" ] && ssh_run "test -f $REMOTE_STATE" >/dev/null 2>&1; then
+  state_pin="$(ssh_run "jq -r --arg c '$cidr' \
     '.dynamic_additions[]? | select(.type == \"pin\" and .source == \$c) | .id' \
     $REMOTE_STATE 2>/dev/null | head -1" 2>/dev/null || true)"
+  [ -n "$state_pin" ] && pin_id="$state_pin"
 fi
 
 # --- Apply changes on router --------------------------------------------------
@@ -226,7 +233,7 @@ fi
 
 # --- Journal ------------------------------------------------------------------
 if ! memory_journal_append "$ROUTER_ALIAS" "unpin_device" \
-       "source=$cidr" "pin_id=${pin_id:-(unknown)}" \
+       "source_ip=$cidr" "pin_id=${pin_id:-(unknown)}" \
        "snapshot_before=${snapshot_id:-(skipped)}"; then
   echo "unpin-device: журнал не записан (не критично)" >&2
 fi
