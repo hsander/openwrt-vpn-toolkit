@@ -96,5 +96,5 @@ kernel randomness and SSH can hang during banner exchange.
 - Real VPN-node traffic: QEMU live coverage uses `--test-direct-outbound` so it
   does not need real VLESS credentials. A future test still needs a controlled
   VLESS Reality node.
-- zapret/DNS live activation: no test yet installs zapret packages/assets or
+- zapret2/DNS live activation: no test yet installs zapret2 packages/assets or
   validates the final DNS chain.

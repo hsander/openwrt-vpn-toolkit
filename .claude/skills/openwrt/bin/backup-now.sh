@@ -180,7 +180,10 @@ trap 'rm -f "$LIST"' EXIT INT TERM
 for p in \
   /etc/sing-box \
   /etc/init.d/sing-box-tproxy \
-  /etc/init.d/zapret-custom \
+  /etc/init.d/zapret2 \
+  /opt/zapret2/config \
+  /opt/zapret2/ipset/zapret-hosts-user.txt \
+  /opt/zapret2/ipset/zapret-ip-user-exclude.txt \
   /etc/config/firewall \
   /etc/config/network \
   /etc/config/dhcp \

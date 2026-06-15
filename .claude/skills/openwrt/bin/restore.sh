@@ -10,7 +10,7 @@
 #   5. tar -xzf snapshot -C / on the router (overwrite).
 #   6. sing-box check on the restored config. If invalid → roll forward to the
 #      safety snapshot and exit 20. Don't leave the router in a broken state.
-#   7. Reload services: sing-box-tproxy, zapret-custom (if present), dnsmasq, fw4.
+#   7. Reload services: sing-box-tproxy, zapret2 (if present), dnsmasq, fw4.
 #   8. Reachability watch (30s). If SSH dies — print panic message with the
 #      safety snapshot id so the user can recover manually.
 #   9. Refresh state.md via bin/doctor.sh (--no-render off — we want it written).
@@ -266,11 +266,11 @@ EOF
 fi
 
 # --- Step 5: reload services ---------------------------------------------------
-# Best-effort reloads. We don't fail if zapret-custom doesn't exist (optional).
+# Best-effort reloads. We don't fail if zapret2 doesn't exist (optional).
 ssh_run "
 set +e
 [ -x /etc/init.d/sing-box-tproxy ] && (/etc/init.d/sing-box-tproxy reload >/dev/null 2>&1 || /etc/init.d/sing-box-tproxy restart >/dev/null 2>&1)
-[ -x /etc/init.d/zapret-custom ]   && /etc/init.d/zapret-custom restart >/dev/null 2>&1
+[ -x /etc/init.d/zapret2 ]         && /etc/init.d/zapret2 restart >/dev/null 2>&1
 [ -x /etc/init.d/dnsmasq ]         && /etc/init.d/dnsmasq reload >/dev/null 2>&1
 command -v fw4 >/dev/null 2>&1     && fw4 reload >/dev/null 2>&1
 true

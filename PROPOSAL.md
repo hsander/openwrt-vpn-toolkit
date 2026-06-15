@@ -1011,6 +1011,14 @@ Compound lock timeout — **30 секунд** (успеть дождаться �
 
 ## 10. Zapret — pinned install
 
+> ⚠ **HERITAGE / устарело.** Навык перешёл на **zapret2** (remittor, бинарь `nfqws2`,
+> Lua-стратегии): init `/etc/init.d/zapret2`, конфиг `/opt/zapret2/config` (строка
+> `NFQWS2_OPT`), исключение VPN-IP через `/opt/zapret2/ipset/zapret-ip-user-exclude.txt`,
+> подбор стратегий через `blockcheck2.sh`. Канонический источник правды —
+> `runbooks/11-zapret2.md` + `templates/zapret/zapret.versions.yaml` +
+> `templates/zapret/zapret2-strategy.md`. Описание ниже (pinned tarball bol-van v72.12)
+> сохранено как исторический контекст и НЕ отражает текущую реализацию.
+
 **Проблема.** `git clone bol-van/zapret` во время install — supply chain риск.
 
 **Решение:**

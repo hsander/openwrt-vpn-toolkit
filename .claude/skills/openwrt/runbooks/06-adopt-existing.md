@@ -31,7 +31,7 @@ bin/adopt.sh --router <alias>
 Что скрипт делает (агенту знать только это):
 1. **Pre-adopt snapshot** через `bin/backup-now.sh --router <alias> --label "pre-adopt"` — на случай, если что-то в дальнейшем пойдёт не так, у нас есть точка возврата к моменту "до прихода скилла".
 2. **Probe** реального состояния роутера (тот же путь, что у `doctor.sh`): что установлено, что запущено, какие порты слушаются.
-3. **Read** `/etc/sing-box/config.json` (если есть и валиден), `/etc/sing-box/rules/*.json`, `/etc/router-watchdog.conf`, nft set'ы `vpn_servers`, init.d/* — без модификации.
+3. **Read** `/etc/sing-box/config.json` (если есть и валиден), `/etc/sing-box/rules/*.json`, `/etc/router-watchdog.conf`, zapret2 ip-exclude (`/opt/zapret2/ipset/zapret-ip-user-exclude.txt`), init.d/* — без модификации.
 4. **Render** `memory/<alias>/{state,vpns,domains,proxies}.md` из реально прочитанного.
 5. **Создаёт** (или обновляет) `/etc/vpn-kit/install-state.json` на роутере с пометкой `source=adopted`, чтобы скрипты `add-*/remove-*/install-*` понимали, что роутер теперь "под скиллом".
 6. **Журналит** событие `adopted_existing_setup` в `memory/<alias>/journal.md` с указанием snapshot ID и сводкой найденных компонентов.
@@ -56,7 +56,7 @@ memory/<alias>/state.md
 Покажи пользователю в человеко-читаемом виде, что нашлось:
 - **sing-box**: установлен / версия / запущен ли как `sing-box-tproxy`.
 - **DNS chain**: есть ли `https-dns-proxy` + dnsmasq + nft DNS redirect.
-- **zapret**: установлен ли, есть ли nft set `vpn_servers`, заполнен ли он.
+- **zapret2**: установлен ли (`/opt/zapret2`, init `zapret2`), запущен ли nfqws2, какие IP в ip-exclude.
 - **watchdog**: есть ли `/etc/router-watchdog.conf` и cron-задача.
 - **outbounds** (из `vpns.md`): список tag → server-host:port.
 - **домены** (из `domains.md`): сколько и куда.

@@ -5,7 +5,8 @@
 #   * appends a new vless outbound (Reality, xtls-rprx-vision)
 #   * optionally appends the tag to the auto-failover urltest outbound
 #   * optionally adds a mixed inbound on 192.168.1.1:<port> bound to this outbound
-#   * propagates the new server IP into the zapret-custom vpn_servers nft set
+#   * excludes the new server IP from zapret2 (zapret-ip-user-exclude.txt) so the
+#     DPI-bypass desync does not corrupt the VPN tunnel handshake
 #
 # Snapshot-before, sing-box check, atomic write, restart with reachability watch,
 # auto-rollback on SSH loss. Secrets (uuid, public_key, short_id, server_name)
@@ -525,9 +526,13 @@ if ! ssh_run "chmod 600 $remote_new && mv -f $remote_new $remote_cfg" >/dev/null
 fi
 
 # ---------------------------------------------------------------------------
-# zapret integration (idempotent)
+# zapret2 integration (idempotent)
 # ---------------------------------------------------------------------------
-zapret_path="/etc/init.d/zapret-custom"
+# zapret2 (remittor) excludes IPs from desync via a plain ip-list file, not an
+# nft set. We add the VPN server IP to /opt/zapret2/ipset/zapret-ip-user-exclude.txt
+# so nfqws2 leaves the tunnel handshake untouched.
+zapret_path="/etc/init.d/zapret2"
+zapret_exclude_file="/opt/zapret2/ipset/zapret-ip-user-exclude.txt"
 
 # Resolve hostname → IP server-side if not already an IP.
 # v_host is shape-validated at parse time, but we still escape via printf %q
@@ -556,28 +561,19 @@ esac
 
 if ssh_run "[ -f $zapret_path ]" >/dev/null 2>&1; then
   if [ -n "$zapret_ip" ]; then
-    # Idempotent inline sed: add IP into the vpn_servers set definition if missing.
-    # The script convention: a line like
-    #   nft add element inet zapret_custom vpn_servers { 1.2.3.4, 5.6.7.8 }
-    # OR a set-element block. We do a grep-based check first, then append a line
-    # to runtime nft AND embed the IP into the script (so it survives reboot).
-    # zapret_ip is regex-validated above (v4 only) so direct interpolation is safe.
+    # Idempotent: append IP to zapret-ip-user-exclude.txt if missing, then restart
+    # zapret2 so nfqws2 reloads the exclude list. zapret_ip is regex-validated
+    # above (v4 only) so direct interpolation into the remote shell is safe.
     ssh_run "
       set -eu
       ip='$zapret_ip'
-      f='$zapret_path'
-      if ! grep -qE \"vpn_servers.*\$ip\" \"\$f\"; then
-        # Append a 'nft add element' line just before the final exit of start() if not already.
-        if grep -qE 'nft add element[^\\n]*vpn_servers' \"\$f\"; then
-          # Add ip to the first existing line, idempotently.
-          sed -i \"0,/nft add element.*vpn_servers[^}]*}/{s/\\(vpn_servers[^}]*\\)}/\\1, \$ip}/}\" \"\$f\" || true
-        else
-          # No existing line — append one at end (best-effort).
-          printf '\\nnft add element inet zapret_custom vpn_servers { %s }\\n' \"\$ip\" >> \"\$f\"
-        fi
+      f='$zapret_exclude_file'
+      [ -f \"\$f\" ] || : > \"\$f\"
+      if ! grep -qxF \"\$ip\" \"\$f\"; then
+        printf '%s\\n' \"\$ip\" >> \"\$f\"
       fi
-      nft add element inet zapret_custom vpn_servers { \$ip } 2>/dev/null || true
-    " >/dev/null 2>&1 || echo "add-vpn: WARN — zapret-custom правка не удалась полностью (не критично)" >&2
+      /etc/init.d/zapret2 restart >/dev/null 2>&1 || true
+    " >/dev/null 2>&1 || echo "add-vpn: WARN — zapret2 ip-exclude правка не удалась полностью (не критично)" >&2
   fi
 fi
 

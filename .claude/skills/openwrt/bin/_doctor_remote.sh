@@ -422,12 +422,12 @@ httpsdns_port="$(uci -q get https-dns-proxy.@https-dns-proxy[0].listen_port 2>/d
 dns_redirect_present=0
 [ -f /etc/nftables.d/10-dns-redirect.nft ] && dns_redirect_present=1
 
-# zapret
+# zapret2 (remittor) — opt path /opt/zapret2, init /etc/init.d/zapret2
 zapret_installed=0
-[ -d /opt/zapret ] && zapret_installed=1
+[ -d /opt/zapret2 ] && zapret_installed=1
 zapret_running=0
-if [ "$zapret_installed" = "1" ] && [ -f /etc/init.d/zapret-custom ]; then
-  /etc/init.d/zapret-custom status >/dev/null 2>&1 && zapret_running=1
+if [ "$zapret_installed" = "1" ] && [ -f /etc/init.d/zapret2 ]; then
+  /etc/init.d/zapret2 status >/dev/null 2>&1 && zapret_running=1
 fi
 
 # watchdog

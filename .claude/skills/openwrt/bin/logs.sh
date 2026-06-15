@@ -73,7 +73,7 @@ done
 case "$source_name" in
   sing-box|singbox|sb) source_name="sing-box" ;;
   watchdog|wd) source_name="watchdog" ;;
-  zapret|zp) source_name="zapret" ;;
+  zapret|zapret2|zp) source_name="zapret" ;;
   all) source_name="all" ;;
   *) echo "logs: невалидный --source '$source_name' (sing-box|watchdog|zapret|all)" >&2; exit 13 ;;
 esac
@@ -139,10 +139,11 @@ logread -e watchdog 2>/dev/null | tail -$n
       fi
       ;;
     zapret)
+      # Match both "zapret2" daemon lines and the init's "zapret:" notices.
       if [ "$f" = "1" ]; then
-        printf '%s' "logread -f -e zapret_custom 2>/dev/null"
+        printf '%s' "logread -f -e zapret 2>/dev/null"
       else
-        printf '%s' "logread -e zapret_custom 2>/dev/null | tail -$n"
+        printf '%s' "logread -e zapret 2>/dev/null | tail -$n"
       fi
       ;;
   esac
@@ -158,7 +159,7 @@ if [ "$source_name" = "all" ]; then
     echo "########## watchdog ##########"
     ssh_run "$(remote_cmd_for watchdog "$lines" 0)" 2>/dev/null || true
     echo
-    echo "########## zapret ##########"
+    echo "########## zapret2 ##########"
     ssh_run "$(remote_cmd_for zapret "$lines" 0)" 2>/dev/null || true
   } | sanitize_stream
   exit 0

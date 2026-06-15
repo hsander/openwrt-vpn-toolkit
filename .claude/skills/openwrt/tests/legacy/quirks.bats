@@ -17,9 +17,9 @@ teardown() { teardown_test_env; }
 
 @test "quirks: set isp.working_zapret_strategy stores string value" {
   "$LIB/quirks-update.sh" init --expected-revision 0 --writer claude-code@t1 >/dev/null
-  "$LIB/quirks-update.sh" set isp.working_zapret_strategy "fakedsplit+badsum" --expected-revision 1 --writer claude-code@t1 >/dev/null
+  "$LIB/quirks-update.sh" set isp.working_zapret_strategy "tcpseg:pos=0,1" --expected-revision 1 --writer claude-code@t1 >/dev/null
   val="$(yq '.isp.working_zapret_strategy' "$VPN_KIT_QUIRKS_FILE")"
-  [ "$val" = "fakedsplit+badsum" ]
+  [ "$val" = "tcpseg:pos=0,1" ]
   [ "$(yq '._revision' "$VPN_KIT_QUIRKS_FILE")" = "2" ]
 }
 

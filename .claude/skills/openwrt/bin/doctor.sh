@@ -277,11 +277,11 @@ fi
 
 zapret_ok="$(bool_to_icon "$zapret_running")"
 if [ "$zapret_installed" = "false" ]; then
-  zapret_details="не установлен (опционально)"
+  zapret_details="zapret2 не установлен (опционально)"
 elif [ "$zapret_running" = "false" ]; then
-  zapret_details="установлен, но не запущен"
+  zapret_details="zapret2 установлен, но не запущен"
 else
-  zapret_details="работает"
+  zapret_details="zapret2 работает"
 fi
 
 if [ "$watchdog_conf_present" = "true" ] && [ "$watchdog_conf_mode" = "600" ]; then
@@ -357,7 +357,7 @@ if [ "$probe_reliable" = "true" ] && { [ "$singbox_config_ok" = "$FAIL" ] || [ "
   next_steps="${next_steps}- \`bin/install-vpn.sh --router $ROUTER_ALIAS --url 'vless://...'\` — поднять sing-box + VPN с нуля\n"
 fi
 if [ "$zapret_ok" = "$FAIL" ] && [ "$zapret_installed" = "false" ]; then
-  next_steps="${next_steps}- (опц.) zapret для DPI-обхода — пока в скрипте не реализовано, см. \`PROPOSAL.md §13\`\n"
+  next_steps="${next_steps}- (опц.) zapret2 для DPI-обхода (YouTube и т.п.) — ставится вручную, см. \`runbooks/11-zapret2.md\`\n"
 fi
 if [ -z "$next_steps" ]; then
   next_steps="Всё базовое настроено. Можно начинать работу: \`bin/add-domain.sh\`, \`bin/add-vpn.sh\` и т.д."
@@ -446,7 +446,7 @@ revision: 0
 | 12 | \`rules/vpn-domains.json\` есть | $rules_ok | $rules_details |
 | 13 | \`/etc/init.d/sing-box-tproxy\` запущен | $tproxy_ok | $tproxy_details |
 | 14 | ≥1 VPN outbound + auto-failover | $vpn_outbound_ok | $vpn_outbound_details |
-| 15 | zapret (опц.) | $zapret_ok | $zapret_details |
+| 15 | zapret2 (опц.) | $zapret_ok | $zapret_details |
 | 16 | \`/etc/router-watchdog.conf\` | $watchdog_conf_ok | $watchdog_conf_details |
 | 17 | Watchdog в crontab | $watchdog_cron_ok | $watchdog_cron_details |
 | 18 | FakeIP cache \`cache.db\` | $fakeip_cache_ok | $fakeip_cache_details |

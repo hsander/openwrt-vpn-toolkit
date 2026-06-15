@@ -59,8 +59,8 @@ Knobs:
 
 ## What it does NOT cover
 
-- `zapret` bootstrap (no equivalent on x86_64 generic; would need
-  build-with-zapret OpenWRT or custom kmod)
+- `zapret2` bootstrap (no equivalent on x86_64 generic; would need
+  build-with-zapret2 OpenWRT or custom kmod)
 - Multi-router scenarios
 - Persistent reboot-then-recheck cycle
 - Wireguard / OpenVPN paths (only VLESS Reality is exercised here)

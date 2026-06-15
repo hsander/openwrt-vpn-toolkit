@@ -1,4 +1,43 @@
-v72.12:
-  source: https://github.com/bol-van/zapret/releases/tag/v72.12
-  sha256: "<fill-before-production-install>"
-  mode: hostlist
+# zapret2 (remittor) — pinned install metadata for the openwrt skill.
+#
+# Навык ставит zapret2, а НЕ zapret v1 (bol-van). zapret2 — это форк remittor с
+# Lua-стратегиями и бинарём nfqws2. Ставится вручную (escape hatch), полный гайд —
+# runbooks/11-zapret2.md.
+#
+# ВАЖНО: стратегия (NFQWS2_OPT) живёт в /opt/zapret2/config, НЕ в uci.
+
+zapret2:
+  package: remittor
+  version: "v0.9.20260307"
+  install:
+    # Канонический способ — пакет remittor через update-pkg.sh с флагом -u 2.
+    method: update-pkg
+    bootstrap_url: "https://raw.githubusercontent.com/remittor/zapret-openwrt/zap1/zapret/update-pkg.sh"
+    command: "curl -fsSL https://raw.githubusercontent.com/remittor/zapret-openwrt/zap1/zapret/update-pkg.sh -o /tmp/zap.sh && sh /tmp/zap.sh -u 2"
+    # На свежем роутере сначала проверить дату (RTC мог сбиться → SSL-ошибки apk/curl):
+    #   date; ntpd -q -p pool.ntp.org
+
+  paths:
+    init: "/etc/init.d/zapret2"
+    binary: "/opt/zapret2/nfq2/nfqws2"
+    config: "/opt/zapret2/config"          # NFQWS2_OPT="..." — источник стратегии
+    lua_dir: "/opt/zapret2/lua"
+    blockcheck: "/opt/zapret2/blockcheck2.sh"
+    hostlist_user: "/opt/zapret2/ipset/zapret-hosts-user.txt"
+    ip_exclude_user: "/opt/zapret2/ipset/zapret-ip-user-exclude.txt"  # VPN-серверы сюда
+
+  mode_filter: hostlist   # none | hostlist | autohostlist
+
+  # Дефолтная рабочая стратегия (TLS: tcpseg). Подобрана через blockcheck2 на стенде
+  # test1 (DPI = SNI silent-drop) и проверена на форвард-клиенте. Полная строка и
+  # кандидаты под другие провайдеры — в templates/zapret/zapret2-strategy.md.
+  default_strategy:
+    label: "Strategy__yt_tcpseg"
+    nfqws2_opt: >-
+      --comment=Strategy__yt_tcpseg
+      --filter-tcp=80 --filter-l7=http <HOSTLIST> --payload=http_req
+      --lua-desync=multisplit:pos=method+2
+      --new --filter-tcp=443 --filter-l7=tls <HOSTLIST> --payload=tls_client_hello
+      --lua-desync=tcpseg:pos=0,1:ip_id=rnd:repeats=1
+      --new --filter-udp=443 --filter-l7=quic <HOSTLIST_NOAUTO> --payload=quic_initial
+      --lua-desync=fake:blob=fake_default_quic:repeats=6

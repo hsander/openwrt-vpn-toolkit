@@ -5,7 +5,7 @@
 #   * deletes the outbound with the matching tag
 #   * removes the tag from auto-failover.outbounds
 #   * removes any mixed-inbound + route rule that pointed at this outbound
-#   * removes the server IP from zapret-custom vpn_servers nft set
+#   * removes the server IP from zapret2 zapret-ip-user-exclude.txt
 #
 # Safety: refuses to remove the LAST VPN outbound (would orphan the router).
 # Override with --force-orphan.
@@ -259,9 +259,10 @@ if ! ssh_run "chmod 600 $remote_new && mv -f $remote_new $remote_cfg" >/dev/null
 fi
 
 # ---------------------------------------------------------------------------
-# zapret cleanup
+# zapret2 cleanup — remove server IP from the ip-exclude list
 # ---------------------------------------------------------------------------
-zapret_path="/etc/init.d/zapret-custom"
+zapret_path="/etc/init.d/zapret2"
+zapret_exclude_file="/opt/zapret2/ipset/zapret-ip-user-exclude.txt"
 zapret_ip=""
 case "$v_host" in
   *[!0-9.]*)
@@ -287,14 +288,19 @@ esac
 
 if [ -n "$zapret_ip" ] && ssh_run "[ -f $zapret_path ]" >/dev/null 2>&1; then
   # zapret_ip is regex-validated above (v4-only) so direct interpolation is safe.
+  # Delete the exact line from the exclude list, then restart zapret2 to reload it.
   ssh_run "
     set -eu
     ip='$zapret_ip'
-    f='$zapret_path'
-    # Idempotent removal from any 'nft add element ... vpn_servers { ... }' line.
-    sed -i \"s/, *\$ip\\b//g; s/{ *\$ip *,/{/g; s/{ *\$ip *}/{ }/g\" \"\$f\" || true
-    nft delete element inet zapret_custom vpn_servers { \$ip } 2>/dev/null || true
-  " >/dev/null 2>&1 || echo "remove-vpn: WARN — zapret-custom cleanup частично не удался" >&2
+    f='$zapret_exclude_file'
+    if [ -f \"\$f\" ]; then
+      # grep -v exits 1 when it filters out every line (file becomes empty) —
+      # that is the correct result, so do not gate the move on grep's exit code.
+      grep -vxF \"\$ip\" \"\$f\" > \"\$f.tmp\" 2>/dev/null || true
+      mv \"\$f.tmp\" \"\$f\"
+    fi
+    /etc/init.d/zapret2 restart >/dev/null 2>&1 || true
+  " >/dev/null 2>&1 || echo "remove-vpn: WARN — zapret2 ip-exclude cleanup частично не удался" >&2
 fi
 
 # ---------------------------------------------------------------------------

@@ -27,8 +27,8 @@ if [ -x "$etc_dir/init.d/podkop" ] || command -v podkop >/dev/null 2>&1; then
   add_conflict podkop "podkop manages transparent proxy/firewall paths that overlap vpn-kit" "disable/remove podkop before install"
 fi
 
-if [ -x "$etc_dir/init.d/zapret" ] || [ -x "$etc_dir/init.d/zapret_custom" ] || [ -d "$opt_dir/zapret" ]; then
-  add_conflict zapret "existing zapret installation may own hostlists/init scripts" "adopt or remove existing zapret before install"
+if [ -x "$etc_dir/init.d/zapret" ] || [ -x "$etc_dir/init.d/zapret_custom" ] || [ -x "$etc_dir/init.d/zapret-custom" ] || [ -x "$etc_dir/init.d/zapret2" ] || [ -d "$opt_dir/zapret" ] || [ -d "$opt_dir/zapret2" ]; then
+  add_conflict zapret "existing zapret/zapret2 installation may own hostlists/init scripts" "adopt or remove existing zapret before install"
 fi
 
 if [ -x "$etc_dir/init.d/mwan3" ] || command -v mwan3 >/dev/null 2>&1; then

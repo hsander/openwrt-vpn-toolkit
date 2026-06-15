@@ -108,7 +108,7 @@ bin/install-vpn.sh --router <alias> --url "$url"
 
 ### Что делает `install-vpn.sh`
 1. snapshot существующего config (если есть).
-2. preflight: версия OpenWRT, пакеты, RAM, конфликты с zapret/awg.
+2. preflight: версия OpenWRT, пакеты, RAM, конфликты с zapret/zapret2/awg.
 3. `apk install sing-box`, DNS chain (https-dns-proxy + dnsmasq + nft redirect), init.d/sing-box-tproxy.
 4. рендер `config.json` с outbound, auto-failover, базовым правилом.
 5. staged-apply: старт сервиса, reachability watchdog, авто-rollback при потере SSH.

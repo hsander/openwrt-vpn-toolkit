@@ -40,7 +40,7 @@ bin/                   # ← safe API. Каждый скрипт — атома�
   add-domain.sh        # → rules/vpn-domains.json (auto-failover) или rules/user-<tag>-domains.json (per-tag), validate, hot reload
   remove-domain.sh
   set-rule-set-outbound.sh # сменить outbound у существующего route.rules rule_set (например telegram/tg-pin)
-  add-vpn.sh           # outbound + auto-failover + zapret vpn_servers set
+  add-vpn.sh           # outbound + auto-failover + zapret2 ip-exclude
   remove-vpn.sh
   add-proxy.sh         # mixed-inbound :400X + route rule
   remove-proxy.sh
@@ -51,7 +51,7 @@ bin/                   # ← safe API. Каждый скрипт — атома�
   snapshot-list.sh
   restore.sh           # staged-apply из snapshot
   health.sh            # sing-box status, nft, DNS resolve, SOCKS exit IP
-  logs.sh              # tail sing-box / watchdog / zapret
+  logs.sh              # tail sing-box / watchdog / zapret2
   raw-ssh.sh           # ⚠ escape hatch — требует явное "yes" в чате
 
 lib/                   # утилиты, которые source'ятся скриптами (НЕ для агента)
@@ -173,7 +173,7 @@ bin/add-vpn.sh --router <alias> --url "vless://..." [--tag <name>] [--add-proxy-
 Скрипт:
 1. Парсит URL → outbound JSON, валидирует.
 2. Snapshot.
-3. Добавляет outbound, обновляет `auto-failover.outbounds`, добавляет server-IP в `vpn_servers` nft set (`zapret-custom`).
+3. Добавляет outbound, обновляет `auto-failover.outbounds`, добавляет server-IP в zapret2 ip-exclude (`/opt/zapret2/ipset/zapret-ip-user-exclude.txt`) — чтобы DPI-десинк не ломал хендшейк туннеля к новому серверу.
 4. Опционально `mixed`-inbound на указанном порту + route rule.
 5. `sing-box check` → staged-apply restart с reachability watchdog (TCP к роутеру каждые 5s, если потеряли — auto-rollback).
 6. `memory/<alias>/vpns.md` + journal.
@@ -236,6 +236,7 @@ bin/raw-ssh.sh --router <alias>
 - `07-add-ip.md` — завернуть IP/CIDR в VPN (proxy_subnets nft-set)
 - `08-pin-device.md` — pin LAN-устройства на конкретный outbound
 - `09-country-pools.md` — страны как единица маршрутизации (usa-pool, pl-pool, sg-pool)
+- `11-zapret2.md` — установка zapret2, дефолтная стратегия (tcpseg), подбор через blockcheck2
 - `99-escape-hatch.md` — когда и как использовать `raw-ssh.sh`
 
 ## Country-pool routing

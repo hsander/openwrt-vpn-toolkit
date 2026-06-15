@@ -46,7 +46,7 @@ bin/add-vpn.sh --router <alias> --url '<url>' [--tag <name>] [--add-proxy-port <
 2. snapshot;
 3. добавляет outbound в `/etc/sing-box/config.json`;
 4. (по умолчанию) добавляет tag в `auto-failover.outbounds` — автоматический failover теперь включает новую ноду;
-5. (если zapret установлен) добавляет server-IP в `vpn_servers` nft set (`zapret-custom`) — DPI-обход срабатывает и для туннеля к новому серверу;
+5. (если zapret2 установлен) добавляет server-IP в ip-exclude (`/opt/zapret2/ipset/zapret-ip-user-exclude.txt`) и рестартит zapret2 — чтобы DPI-десинк не ломал хендшейк туннеля к новому серверу;
 6. (если `--add-proxy-port`) добавляет mixed-inbound + route rule;
 7. `sing-box check` → staged-apply restart (reachability check каждые 5s, auto-rollback при потере SSH);
 8. обновляет `memory/<alias>/vpns.md` (tag, host, port, в-failover, mixed-port) + `proxies.md` (если был port) + `journal.md`.
@@ -85,7 +85,7 @@ Exit codes:
 
 Что произошло:
 - Outbound добавлен в /etc/sing-box/config.json
-- (если zapret стоит) Server-IP в nft set vpn_servers — DPI-обход прикрыл новый туннель
+- (если zapret2 стоит) Server-IP в ip-exclude zapret2 — десинк не трогает туннель
 - sing-box перезапущен (staged-apply, reachability OK)
 
 Откатить: «откати к <snap-id>».
@@ -94,7 +94,7 @@ Exit codes:
 ## Edge cases / частые ошибки
 
 - **Tag совпадает с существующим** → скрипт откажет (exit 13), кроме случая `--force` (но `--force` не используй сам, спроси пользователя).
-- **Server host совпадает с существующим outbound'ом** (один и тот же VPS, два разных порта/UUID) → скрипт пропустит (это валидно), но zapret nft set уже знает этот IP — двойная запись игнорируется.
+- **Server host совпадает с существующим outbound'ом** (один и тот же VPS, два разных порта/UUID) → скрипт пропустит (это валидно), но zapret2 ip-exclude уже знает этот IP — повторная строка не добавляется (идемпотентно).
 - **Auto-failover пустой / отсутствует** → state.md пункт 14 должен быть `❌`, отправь на `01-first-time.md`.
 - **`--add-proxy-port` без `--router`'ского host'а** — `add-vpn.sh` использует тот же listen (`192.168.1.1`), что и существующие. Если LAN у пользователя другой подсети — это всплывёт, и пользователь скажет «proxy не работает с моего ноута». Тогда `--listen` управляется отдельным флагом на `add-proxy.sh`, не на `add-vpn.sh`.
 - **Exit 20 на staged-apply** → не делай retry. Snapshot восстановлен, выясняй причину через `logs.sh` или escape hatch.
@@ -105,4 +105,4 @@ Exit codes:
 - НЕ обходить «vless-only» ограничение через escape hatch без явного запроса пользователя.
 - НЕ запускать `--force` без явного согласия пользователя.
 - НЕ делать ретрай после exit 20.
-- НЕ предполагать, что zapret установлен — `add-vpn.sh` сам проверит и добавит IP в set только если zapret-custom есть.
+- НЕ предполагать, что zapret2 установлен — `add-vpn.sh` сам проверит (`/etc/init.d/zapret2`) и добавит IP в ip-exclude только если zapret2 есть.
