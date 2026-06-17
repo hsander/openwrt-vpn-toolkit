@@ -219,12 +219,34 @@ jq --arg t "$tag" --arg force_orphan "$force_orphan" '
       else . end
     ))
 
-  # Step B: if --force-orphan, remove urltest outbounds whose .outbounds became empty
+  # Step B: if --force-orphan, remove urltest outbounds whose .outbounds became empty.
+  # Also remove those deleted pool tags from remaining urltest groups. Otherwise
+  # auto-failover can keep a dangling dependency and sing-box fails at startup.
   | if $force_orphan == "1" then
+      ([.outbounds[]? |
+        select(.type == "urltest" and ((.outbounds // []) | length) == 0) |
+        .tag
+      ] | unique) as $empty_pools
+      |
       .outbounds = (.outbounds | map(select(
         if .type == "urltest" then (.outbounds // [] | length) > 0
         else true end
       )))
+      | .outbounds = (.outbounds | map(
+          if .type == "urltest" then
+            (.outbounds = ((.outbounds // []) | map(. as $candidate | select(($empty_pools | index($candidate)) | not))))
+            | ((.default // "") as $d |
+                if ($d != "" and (((.outbounds // []) | index($d)) | not)) then
+                  if ((.outbounds // []) | length) > 0 then
+                    .default = .outbounds[0]
+                  else
+                    del(.default)
+                  end
+                else
+                  .
+                end)
+          else . end
+        ))
     else . end
 
   | (
@@ -247,8 +269,10 @@ if ! scp_to "$local_new_cfg" "$remote_new" >/dev/null 2>&1; then
   echo "remove-vpn: scp нового config.json не удался" >&2
   exit 2
 fi
-if ! ssh_run "sing-box check -c $remote_new" >/dev/null 2>&1; then
+check_out=""
+if ! check_out="$(ssh_run "sing-box check -c $remote_new" 2>&1)"; then
   echo "remove-vpn: 'sing-box check' зафейлился на новом config'е" >&2
+  printf '%s\n' "$check_out" | sed -E 's#vless://[^[:space:]]+#[REDACTED]#g' >&2
   ssh_run "rm -f $remote_new" >/dev/null 2>&1 || true
   exit 13
 fi
