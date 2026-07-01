@@ -165,6 +165,16 @@ bin/set-rule-set-outbound.sh --router <alias> --rule-set <rule_set_tag> --outbou
 
 Скрипт делает snapshot, проверяет наличие outbound, скачивает `config.json`, меняет только правила с указанным `rule_set`, валидирует что количество `route.rules` не изменилось, запускает `sing-box check`, применяет конфиг и hot-reload. После exit 0 всегда запускай `bin/doctor.sh --router <alias> --json` и проверь `rule_set_outbound_map`.
 
+**⚠ Сброс FakeIP-кэша обязателен после переключения outbound**, если домены уже резолвились через sing-box. Без этого активные соединения продолжают идти через старый outbound (кэш `cache.db` хранит маппинг FakeIP → реальный IP → outbound):
+```bash
+ssh <alias> "rm -f /usr/share/sing-box/cache.db && /etc/init.d/sing-box-tproxy restart"
+```
+
+**⚠ Тег rule_set в `set-rule-set-outbound.sh` — это tag из `route.rules[].rule_set`**, не имя файла. Они могут различаться (например, файл `tg-pin-domains.json` → tag `tg-pin`). Перед вызовом проверяй теги:
+```bash
+ssh <alias> "jq '[.route.rules[] | select(.rule_set != null) | {rule_set:.rule_set,outbound:.outbound}]' /etc/sing-box/config.json"
+```
+
 ## Поток "добавить VPN"
 
 ```
