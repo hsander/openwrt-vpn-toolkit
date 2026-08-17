@@ -4,8 +4,8 @@
 set -eu
 
 phase="${1:-}"
-ethernet_uuid='08428cd5-3e84-37ae-9112-8b9863e956aa'
-wifi_uuid='53486aa4-d172-4d85-b29a-4f5f83ba8df8'
+ethernet_uuid="${HOME_SERVER_ETHERNET_UUID:-00000000-0000-0000-0000-000000000001}"
+wifi_uuid="${HOME_SERVER_WIFI_UUID:-00000000-0000-0000-0000-000000000002}"
 state_dir='/var/lib/vpn-kit-lan99-finalize'
 rollback='/usr/local/sbin/vpn-kit-lan99-finalize-rollback'
 timer='vpn-kit-lan99-finalize-rollback.timer'
@@ -35,7 +35,7 @@ case "$phase" in
     chmod 0700 "$backup"
     tar -czpf "$backup/files.tar.gz" \
       /etc/NetworkManager/system-connections \
-      /etc/netplan/90-NM-08428cd5-3e84-37ae-9112-8b9863e956aa.yaml \
+      /etc/netplan/90-NM-home-server-ethernet.yaml \
       /opt/openclaw/docker-compose.yml \
       /opt/openclaw-data/config/openclaw.json \
       /opt/openclaw-data/config/agents/main/agent/models.json \

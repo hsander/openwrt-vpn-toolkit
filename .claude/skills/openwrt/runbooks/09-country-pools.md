@@ -8,9 +8,9 @@ Failover происходит **внутри страны** — между но�
 
 ```
 auto-failover
-  ├── usa-pool  (usa-4, usa-6-dev, usa-4-crip)
-  ├── pl-pool   (polsha)
-  └── sg-pool   (redshield-sg)
+  ├── usa-pool  (node-us-a, node-us-b)
+  ├── pl-pool   (node-pl-a)
+  └── sg-pool   (node-sg-a)
 ```
 
 ## Реестр countries.yaml
@@ -22,17 +22,16 @@ version: 1
 countries:
   usa:
     pool: usa-pool
-    nodes: [usa-4, usa-6-dev, usa-4-crip]
+    nodes: [node-us-a, node-us-b]
   pl:
     pool: pl-pool
-    nodes: [polsha]
+    nodes: [node-pl-a]
   sg:
     pool: sg-pool
-    nodes: [redshield-sg]
+    nodes: [node-sg-a]
 aliases:
   us: usa
   poland: pl
-  polsha: pl
   singapore: sg
 ```
 
@@ -50,21 +49,21 @@ bin/add-domain.sh --router home --domain example.com --outbound usa
 ### Привязать устройство к стране
 
 ```bash
-bin/pin-device.sh --router home --source-ip 192.168.99.x --outbound usa
+bin/pin-device.sh --router <router-alias> --source-ip <lan-client-ip> --outbound usa
 # → route.rules: source_ip_cidr → usa-pool
 ```
 
 ### Локальный прокси на страну
 
 ```bash
-bin/add-proxy.sh --router home --port 4010 --outbound usa
+bin/add-proxy.sh --router <router-alias> --port 4010 --outbound usa
 # → mixed inbound :4010 → usa-pool
 ```
 
 ### Добавить VPN-ноду в страну
 
 ```bash
-bin/add-vpn.sh --router home --url "vless://..." --tag usa-new --country usa
+bin/add-vpn.sh --router <router-alias> --url "vless://..." --tag node-us-new --country usa
 # → нода в config + usa-pool.outbounds += [usa-new]
 # → auto-failover не меняется (usa-pool уже там)
 ```
@@ -72,13 +71,13 @@ bin/add-vpn.sh --router home --url "vless://..." --tag usa-new --country usa
 ### Привязка к конкретной ноде (backward-compat)
 
 ```bash
-bin/add-domain.sh --router home --domain example.com --outbound usa-4
-# → user-usa-4-domains.json, route → usa-4 (конкретная нода, без pool failover)
+bin/add-domain.sh --router <router-alias> --domain example.com --outbound node-us-a
+# → user-node-us-a-domains.json, route → node-us-a (конкретная нода, без pool failover)
 ```
 
 ## Добавить новую страну
 
-1. Добавить VPN-ноду: `bin/add-vpn.sh --router home --url "vless://..." --country de`
+1. Добавить VPN-ноду: `bin/add-vpn.sh --router <router-alias> --url "vless://..." --country de`
    - Скрипт создаст `de-pool` urltest и добавит его в `auto-failover`
 2. Обновить `memory/home/countries.yaml` вручную — добавить секцию `de`
 3. Проверить: `ssh home-router 'jq ".outbounds[] | select(.tag == \"de-pool\")" /etc/sing-box/config.json'`
@@ -86,14 +85,14 @@ bin/add-domain.sh --router home --domain example.com --outbound usa-4
 ## Удалить ноду из пула
 
 ```bash
-bin/remove-pool-members.sh --router home --pool usa-pool --member usa-6-dev
+bin/remove-pool-members.sh --router <router-alias> --pool usa-pool --member node-us-b
 # Несколько нод удаляются атомарно повторением --member.
 # Outbound-конфигурации и route rules сохраняются.
 # Если после удаления pool станет пустым → exit 13.
 ```
 
 Если требуется удалить сам VPN-outbound вместе с его proxy/rules, используй
-`bin/remove-vpn.sh --router home --tag usa-6-dev`.
+`bin/remove-vpn.sh --router <router-alias> --tag node-us-b`.
 
 ## Диагностика
 
@@ -108,11 +107,11 @@ cat memory/home/countries.yaml
 . lib/country-resolve.sh
 resolve_country_to_pool home usa  # → usa-pool
 resolve_country_to_pool home us   # → usa-pool
-resolve_country_to_pool home usa-4  # → usa-4 (без изменений)
+resolve_country_to_pool <router-alias> node-us-a  # → node-us-a (без изменений)
 ```
 
 ## Заметки
 
-- `--outbound usa` и `--outbound usa-4` создают разные rule-set файлы: `user-usa-pool-domains.json` и `user-usa-4-domains.json`. Домены в них не пересекаются.
-- `polsha-proxy` (http outbound) не входит ни в один пул — только VLESS-ноды.
+- `--outbound usa` и `--outbound node-us-a` создают разные rule-set файлы: `user-usa-pool-domains.json` и `user-node-us-a-domains.json`. Домены в них не пересекаются.
+- HTTP outbounds, если они есть, не входят в пул — в пул добавляются только совместимые VLESS-ноды.
 - `resolve_country_to_pool` — pure bash/awk, без SSH, без jq. Неизвестный input проходит без изменений (exit 0).

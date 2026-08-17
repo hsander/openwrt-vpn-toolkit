@@ -1,0 +1,44 @@
+#!/bin/sh
+# Guarded daily reboot helper for travel routers.
+
+set -eu
+
+minimum_uptime_seconds="${TRAVEL_REBOOT_MIN_UPTIME_SECONDS:-3600}"
+dry_run="${TRAVEL_DAILY_REBOOT_DRY_RUN:-0}"
+
+case "$minimum_uptime_seconds" in
+  ''|*[!0-9]*) exit 13 ;;
+esac
+[ "$minimum_uptime_seconds" -ge 3600 ] || exit 13
+
+now_epoch="$(date +%s 2>/dev/null || echo 0)"
+uptime_seconds="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
+case "$now_epoch" in
+  ''|*[!0-9]*) now_epoch=0 ;;
+esac
+case "$uptime_seconds" in
+  ''|*[!0-9]*) uptime_seconds=0 ;;
+esac
+
+# Do not reboot from an unsynchronised clock or shortly after another reboot.
+if [ "$now_epoch" -lt 1704067200 ]; then
+  logger -t travel-daily-reboot "skip: system time is not synchronised"
+  echo "scheduled_reboot=skipped_time_unsynchronised"
+  exit 0
+fi
+if [ "$uptime_seconds" -lt "$minimum_uptime_seconds" ]; then
+  logger -t travel-daily-reboot "skip: uptime ${uptime_seconds}s is below ${minimum_uptime_seconds}s"
+  echo "scheduled_reboot=skipped_recent_boot"
+  exit 0
+fi
+
+if [ "$dry_run" = 1 ]; then
+  echo "scheduled_reboot=dry_run_ok"
+  echo "uptime_seconds=$uptime_seconds"
+  exit 0
+fi
+
+logger -t travel-daily-reboot "scheduled reboot after ${uptime_seconds}s uptime"
+sync
+sleep 2
+/sbin/reboot

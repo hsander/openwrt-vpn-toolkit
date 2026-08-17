@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_USER="${HOME_SERVER_USER:-horuzhenko}"
+SERVER_USER="${HOME_SERVER_USER:-root}"
 SERVER_HOST="${HOME_SERVER_PRIMARY_HOST:-192.168.99.50}"
 REMOTE='/usr/local/sbin/vpn-kit-lan99-finalize'
 ROLLBACK_REMOTE='/usr/local/sbin/vpn-kit-lan99-finalize-rollback'

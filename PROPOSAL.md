@@ -3,7 +3,7 @@ title: OpenWrt VPN Kit — LLM-driven setup skill для домашних роу
 status: draft / proposal
 created: 2026-04-21
 updated: 2026-04-21 (revision 6: commit=state-write atomic, success/rolled-back snapshot split, revision-based sync)
-author: собрано из разговора с пользователем (horuzhenko.alex@gmail.com)
+author: project contributors
 future_location: отдельный git-репозиторий (пока лежит в ssh-claude/openwrt-vpn-kit/)
 ---
 
@@ -1364,7 +1364,7 @@ git clone https://github.com/user/openwrt-vpn-kit ~/router-setup
 **Сетевые probe'ы (controlled endpoints, не chatgpt/youtube):**
 - [ ] TCP-probe `:443` на первый VLESS-сервер (из answers.yaml) → connect OK
 - [ ] TCP-probe `1.1.1.1:443` через VPN tproxy → OK
-- [ ] Telegram API reachability: `curl --resolve api.telegram.org:443:149.154.167.220 -sI https://api.telegram.org` — HTTP/2 401 (ожидаемо без токена)
+- [ ] Telegram API reachability: resolve `api.telegram.org` through the active test environment and verify an expected unauthenticated response (for example HTTP 401), without pinning a production IP
 
 **End-to-end:**
 - [ ] Скрипт `tg-send.sh` шлёт тестовое сообщение → `getUpdates` видит его (или юзер подтверждает получение)
@@ -1457,4 +1457,3 @@ git clone https://github.com/user/openwrt-vpn-kit ~/router-setup
 **Revision 5** (CAS + retention + hygiene), **Revision 4** (операционная память R1-R8), **Revision 3** (safety: procd-daemon, persistence, UCI-derived, Wi-Fi merge).
 
 Ждёт старта реализации Этапа 0 (safety + memory + CAS + GC — всё вместе, до любых инсталляторов).
-

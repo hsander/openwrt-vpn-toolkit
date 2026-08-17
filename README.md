@@ -16,7 +16,7 @@ You open this project in Claude Code and simply say:
 > *"YouTube stopped working, fix it"*  
 > *"Route my TV through the US server"*  
 > *"Add Instagram to the bypass list"*
-> *"Turn router 001 into a travel router and connect it to my phone hotspot"*
+> *"Turn my router into a travel router and connect it to my phone hotspot"*
 
 Claude handles everything: connects to the router over SSH, makes a backup, applies the change safely, and rolls back automatically if something goes wrong.
 
@@ -61,6 +61,8 @@ Claude handles everything: connects to the router over SSH, makes a backup, appl
 | Join hotel Wi-Fi from a phone/tablet | Add or change the external Wi-Fi in LuCI without a laptop |
 | Hidden private Wi-Fi with physical recovery | A short Wireless Pairing press exposes MobileHub for 10 minutes; press again to hide it now |
 | Home ↔ travel access over AWG2 | Routes only the home LAN through the tunnel; ordinary internet stays on the local uplink |
+| Resilient home-LAN access for travel routers (pilot) | Keeps direct AWG primary and can fail private routes over a separate AWG relay on VPS UDP/443 |
+| Guarded scheduled reboot | Installs one daily reboot job without replacing unrelated cron entries; skips reboot when time is unsynchronised or uptime is under one hour |
 | Safe LAN subnet migration | Uses prepare/cutover/confirm/rollback with recovery endpoints instead of a one-shot address change |
 
 The safe API starts after OpenWrt is installed. Flashing vendor firmware,
@@ -73,8 +75,8 @@ and must not be inferred from the travel-router workflow.
 
 1. Power on the router. If MobileHub is hidden, briefly press the physical
    `Wireless Pairing` button: both bands become visible for 10 minutes.
-2. Connect your phone/tablet to MobileHub, then open LuCI at the router's travel address, for example
-   `http://172.27.1.1` for router 001 (or HTTPS if it was configured explicitly).
+2. Connect your phone/tablet to MobileHub, then open LuCI at the travel address
+   configured for your router (or HTTPS if it was configured explicitly).
 3. Open `Services -> Travelmate`, scan, choose the hotel or hotspot SSID, enter
    its password, and select `Save & Apply`.
 4. If the hotel has a captive portal, remain on the private Wi-Fi and open a
@@ -89,6 +91,41 @@ a security boundary; WPA2 and its password remain the actual protection.
 Use 2.4 GHz for range and 5 GHz for speed. Unknown open networks are never added
 automatically. Full setup and verification procedure:
 [`12-travel-router.md`](./.claude/skills/openwrt/runbooks/12-travel-router.md).
+
+## Resilient travel routing (pilot)
+
+The optional resilient workflow keeps the existing direct AWG path as primary
+and adds a separate AWG relay through a trusted Ubuntu VPS on **UDP/443**. It
+fails over only the configured private home/travel LAN routes; it never gives
+the backup AWG client `0.0.0.0/0` and never replaces the router's default
+internet route. Existing VLESS/Xray on **TCP/443** remains a separate service.
+
+The pilot has a fixed startup order: connect to the home router through the
+direct AmneziaWG2 interface first; if that path is unavailable, try the backup
+interface through a configured VPS relay on UDP/443. Ordinary internet stays on
+the current uplink and is never moved through the VPS. After recovery, the route
+returns to the direct link. Configure additional travel routers only after the
+first pilot passes.
+
+Faster failover startup requires a separate measured change: early `awg2`
+readiness checks after `ifup`, shorter probe/keepalive intervals, removal of a
+stale `awg1` route, and the existing hysteresis protection against flapping.
+Those optimizations are not enabled yet.
+
+Use this workflow only after the ordinary travel profile and direct AWG link
+are verified. The safe sequence is VPS audit → relay hub → router clients and
+VPS peers → route watchdogs on both ends → handshake, MTU, route, internet/DNS,
+memory, reboot, outage, and recovery tests. Every mutating step creates a
+snapshot or prints its rollback command. Removing a live VPS peer may require a
+planned VPS reboot because the workflow deliberately avoids unsafe live DKMS
+peer/interface teardown.
+
+A VLESS reserve can provide backup internet, but it does **not** prove access to
+the home LAN when UDP is blocked. Private keys, VLESS URLs/UUIDs, Reality keys,
+and passwords must never be written to the repository, logs, or memory files.
+The current implementation is contract-tested but remains a pilot until the
+full physical/VPS acceptance matrix is completed. See
+[`13-resilient-travel-failover.md`](./.claude/skills/openwrt/runbooks/13-resilient-travel-failover.md).
 
 ---
 
@@ -146,6 +183,8 @@ The travel stack:
 - **Permanent private AP** — client devices keep using one trusted SSID
 - **AmneziaWG 2 site-to-site** — management and home-LAN access over a separate tunnel
 - **Split routing** — only home-LAN traffic uses AWG2; ordinary internet uses the local uplink
+- **Optional resilient AWG relay** — hysteretic private-route failover through a VPS on UDP/443, without changing the default route
+- **Guarded daily reboot** — preserves unrelated cron jobs and refuses unsafe early/unsynchronised reboot
 
 ---
 
@@ -157,6 +196,22 @@ The travel stack:
 - `memory/routers.yaml` is gitignored — your router IPs never end up in the repo
 
 **If your laptop is stolen:** change your VPN keys, rotate the Telegram bot token, remove the SSH key from each router's `authorized_keys`. See [README.ru.md](./README.ru.md#если-ноутбук-украли) for the full checklist.
+
+### Commit-time privacy guard
+
+This repository includes a versioned pre-commit hook that scans **staged added
+lines** for known project-specific infrastructure markers and secret-shaped
+values (private keys, bot tokens, and complete `vless://` URLs). Enable it once
+after cloning:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook is a safety net, not a replacement for review. Replace real router
+aliases, endpoints, SSIDs, usernames, UUIDs, and keys with placeholders before
+staging public documentation. Run the checker manually with
+`.claude/skills/openwrt/bin/check-public-data.sh --staged`.
 
 ---
 
@@ -180,6 +235,10 @@ The travel stack:
 │   ├── configure-travel-router.sh  # Private AP, unique LAN and split route
 │   ├── configure-home-travel-route.sh # Reverse route on the home router
 │   ├── verify-travel-router.sh     # End-to-end and post-reboot proof
+│   ├── configure-scheduled-reboot.sh # Guarded daily reboot without replacing cron
+│   ├── install-vps-awg-hub.sh      # Isolated AWG relay on VPS UDP/443
+│   ├── install-awg-route-failover.sh # Private-route failover/failback watchdog
+│   ├── verify-resilient-awg.sh     # Secret-free relay, route, MTU and resource proof
 │   └── ...
 ├── lib/              # Shared helpers (sourced by bin/, not called directly)
 ├── memory/           # Per-router state: routers.yaml + <alias>/*.md

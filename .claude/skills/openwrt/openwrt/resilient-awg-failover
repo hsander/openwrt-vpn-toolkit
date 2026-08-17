@@ -1,0 +1,134 @@
+#!/bin/sh
+# Hysteretic route failover between a primary and a backup AmneziaWG link.
+
+set -eu
+
+config_file=/etc/resilient-awg-failover.conf
+[ "${1:-}" != --config ] || { config_file="${2:-}"; shift 2; }
+[ -r "$config_file" ] || { echo "failover_config=missing" >&2; exit 13; }
+
+# The installer writes only validated shell-safe values to this root-owned file.
+# shellcheck disable=SC1090
+. "$config_file"
+
+: "${TARGET_CIDR:?}"
+: "${PRIMARY_INTERFACE:?}"
+: "${PRIMARY_PROBE_IP:?}"
+: "${BACKUP_INTERFACE:?}"
+: "${BACKUP_PROBE_IP:?}"
+
+INTERVAL_SECONDS="${INTERVAL_SECONDS:-10}"
+FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"
+RECOVER_THRESHOLD="${RECOVER_THRESHOLD:-3}"
+STATE_FILE="${STATE_FILE:-/var/run/resilient-awg-failover.state}"
+MAX_LOOPS="${RESILIENT_AWG_MAX_LOOPS:-0}"
+
+for value in "$INTERVAL_SECONDS" "$FAIL_THRESHOLD" "$RECOVER_THRESHOLD" "$MAX_LOOPS"; do
+  case "$value" in ''|*[!0-9]*) exit 13 ;; esac
+done
+[ "$INTERVAL_SECONDS" -ge 1 ] && [ "$FAIL_THRESHOLD" -ge 1 ] && [ "$RECOVER_THRESHOLD" -ge 1 ] || exit 13
+
+for value in "$TARGET_CIDR" "$PRIMARY_PROBE_IP" "$BACKUP_PROBE_IP"; do
+  case "$value" in ''|*[!0-9./]*) exit 13 ;; esac
+done
+for value in "$PRIMARY_INTERFACE" "$BACKUP_INTERFACE"; do
+  case "$value" in ''|*[!A-Za-z0-9_.-]*) exit 13 ;; esac
+done
+
+log_event() {
+  logger -t resilient-awg-failover "$*"
+  printf '%s\n' "$*"
+}
+
+probe() {
+  interface="$1"
+  address="$2"
+  ip link show dev "$interface" >/dev/null 2>&1 &&
+    ping -I "$interface" -c 1 -W 2 "$address" >/dev/null 2>&1
+}
+
+route_has_interface() {
+  route_interface="$1"
+  route_dev="$2"
+  ip -4 route show "$route_interface" 2>/dev/null |
+    awk -v expected="$route_dev" 'NR == 1 { for (i=1; i<=NF; i++) if ($i == "dev") exit ($(i+1) == expected ? 0 : 1); exit 1 }'
+}
+
+target_probe() {
+  # Tunnel-peer liveness alone can be true while VPS forwarding or the remote
+  # LAN route is broken. If supplied, probe an actual target on TARGET_CIDR.
+  target="${TARGET_PROBE_IP:-}"
+  # Keep peer-IP liveness as the safe pre-switch probe. An actual target LAN
+  # can be validated only after the candidate route is active; otherwise the
+  # existing primary route wins and gives a false result.
+  probe "$1" "$2"
+}
+
+route_interface() {
+  ip -4 route show "$TARGET_CIDR" 2>/dev/null |
+    awk 'NR == 1 { for (i=1; i<=NF; i++) if ($i == "dev") { print $(i+1); exit } }'
+}
+
+activate_route() {
+  next_mode="$1"
+  if [ "$next_mode" = primary ]; then
+    next_interface="$PRIMARY_INTERFACE"
+  else
+    next_interface="$BACKUP_INTERFACE"
+  fi
+  # netifd may keep a proto-static route for the primary interface. Delete all
+  # exact target routes first; `route replace` alone can leave that route ahead
+  # of the watchdog route and make a reported switch ineffective.
+  while ip -4 route del "$TARGET_CIDR" >/dev/null 2>&1; do :; done
+  ip -4 route replace "$TARGET_CIDR" dev "$next_interface" metric 10
+  [ "$(route_interface)" = "$next_interface" ] || return 1
+  mode="$next_mode"
+  printf '%s\n' "$mode" >"$STATE_FILE.tmp.$$"
+  chmod 600 "$STATE_FILE.tmp.$$"
+  mv -f "$STATE_FILE.tmp.$$" "$STATE_FILE"
+  log_event "route=$TARGET_CIDR mode=$mode interface=$next_interface"
+}
+
+mode=primary
+current_interface="$(route_interface)"
+[ "$current_interface" != "$BACKUP_INTERFACE" ] || mode=backup
+primary_failures=0
+primary_successes=0
+loops=0
+
+while :; do
+  if target_probe "$PRIMARY_INTERFACE" "$PRIMARY_PROBE_IP"; then
+    primary_failures=0
+    if [ "$mode" = backup ]; then
+      primary_successes=$((primary_successes + 1))
+      if [ "$primary_successes" -ge "$RECOVER_THRESHOLD" ]; then
+        activate_route primary || log_event "route_switch=primary_failed target=$TARGET_CIDR"
+        primary_successes=0
+      fi
+    else
+      primary_successes=0
+      [ "$(route_interface)" = "$PRIMARY_INTERFACE" ] || \
+        activate_route primary || log_event "route_repair=primary_failed target=$TARGET_CIDR"
+    fi
+  else
+    primary_successes=0
+    if [ "$mode" = primary ]; then
+      primary_failures=$((primary_failures + 1))
+      if [ "$primary_failures" -ge "$FAIL_THRESHOLD" ]; then
+        if target_probe "$BACKUP_INTERFACE" "$BACKUP_PROBE_IP"; then
+          activate_route backup || log_event "route_switch=backup_failed target=$TARGET_CIDR"
+        else
+          log_event "backup=unavailable target=$TARGET_CIDR primary_failures=$primary_failures"
+        fi
+        primary_failures=0
+      fi
+    elif ! target_probe "$BACKUP_INTERFACE" "$BACKUP_PROBE_IP"; then
+      # Do not touch the default route and do not invent a third path. Keeping
+      # the last private route cannot break ordinary WAN Internet.
+      log_event "primary=unavailable backup=unavailable target=$TARGET_CIDR"
+    fi
+  fi
+  loops=$((loops + 1))
+  [ "$MAX_LOOPS" = 0 ] || [ "$loops" -lt "$MAX_LOOPS" ] || exit 0
+  sleep "$INTERVAL_SECONDS"
+done

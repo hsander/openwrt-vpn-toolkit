@@ -208,6 +208,8 @@ for p in \
   /etc/dnsmasq.conf \
   /etc/router-watchdog.conf \
   /etc/travel-ap-button.conf \
+  /etc/resilient-awg-failover.d \
+  /etc/init.d/resilient-awg-failover \
   /etc/vpn-kit/install-state.json \
   /etc/vpn-kit/firewall \
   /etc/vpn-kit/cron \
@@ -220,6 +222,8 @@ do
 done
 
 [ -e /usr/libexec/travel-ap-autohide ] && printf '%s\n' /usr/libexec/travel-ap-autohide >> "$LIST"
+[ -e /usr/libexec/travel-daily-reboot ] && printf '%s\n' /usr/libexec/travel-daily-reboot >> "$LIST"
+[ -e /usr/libexec/resilient-awg-failover ] && printf '%s\n' /usr/libexec/resilient-awg-failover >> "$LIST"
 
 # Glob for watchdog scripts (may be empty).
 for f in /usr/bin/*-watchdog.sh; do

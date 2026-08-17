@@ -3,7 +3,7 @@
 
 set -eu
 
-connection_uuid='08428cd5-3e84-37ae-9112-8b9863e956aa'
+connection_uuid="${HOME_SERVER_CONNECTION_UUID:-00000000-0000-0000-0000-000000000001}"
 state_dir='/var/lib/vpn-kit-lan99-server'
 
 systemctl stop vpn-kit-lan99-server-rollback.timer >/dev/null 2>&1 || true

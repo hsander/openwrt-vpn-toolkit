@@ -19,6 +19,7 @@
 | [`11-lan-migration.md`](./11-lan-migration.md) | Транзакционная миграция LAN: prepare → cutover → confirm или автоматический rollback | ✅ |
 | [`11-zapret2.md`](./11-zapret2.md) | zapret2: установка (remittor), дефолтная стратегия tcpseg, подбор через blockcheck2, DPI-обход YouTube | ✅ |
 | [`12-travel-router.md`](./12-travel-router.md) | Travelmate, внешние Wi-Fi с телефона/планшета, скрытый MobileHub с Wireless Pairing, AWG2 и reboot proof | ✅ |
+| [`13-resilient-travel-failover.md`](./13-resilient-travel-failover.md) | RU + EN: двухуровневый резерв travel — direct AWG, relay AWG UDP/443, VLESS TCP/443 | 🚧 |
 | [`99-escape-hatch.md`](./99-escape-hatch.md) | Когда и как использовать `bin/raw-ssh.sh` (требует явное «yes») | ✅ |
 
 ## Структура каждого runbook'а

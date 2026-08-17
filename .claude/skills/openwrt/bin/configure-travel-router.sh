@@ -32,7 +32,7 @@ ssh_alias=""
 ssid=""
 lan_cidr=""
 home_lan=""
-uplink_ssid="iPhoneSander"
+uplink_ssid="<known-uplink-ssid>"
 peer_section="home_peer_awg2"
 password_stdin=0
 

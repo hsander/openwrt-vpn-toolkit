@@ -5,10 +5,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLLBACK_SOURCE="$SCRIPT_DIR/home-server-lan99-rollback.sh"
-SERVER_USER="${HOME_SERVER_USER:-horuzhenko}"
+SERVER_USER="${HOME_SERVER_USER:-root}"
 PRIMARY_HOST="${HOME_SERVER_PRIMARY_HOST:-192.168.99.50}"
 RECOVERY_HOST="${HOME_SERVER_RECOVERY_HOST:-192.168.1.103}"
-CONNECTION_UUID='08428cd5-3e84-37ae-9112-8b9863e956aa'
+CONNECTION_UUID="${HOME_SERVER_CONNECTION_UUID:-00000000-0000-0000-0000-000000000001}"
 STATE_DIR='/var/lib/vpn-kit-lan99-server'
 ROLLBACK_REMOTE='/usr/local/sbin/vpn-kit-lan99-server-rollback'
 TIMER_UNIT='vpn-kit-lan99-server-rollback.timer'

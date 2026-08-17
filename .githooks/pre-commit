@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Repository hook: reject personal infrastructure and secrets in added lines.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+exec "$repo_root/.claude/skills/openwrt/bin/check-public-data.sh" --staged

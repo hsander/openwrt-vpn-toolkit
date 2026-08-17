@@ -17,10 +17,33 @@ setup() {
     verify-travel-router.sh \
     verify-awg2-link.sh \
     verify-wifi-uplink.sh \
+    inspect-scheduled-reboot.sh \
+    configure-scheduled-reboot.sh \
+    audit-vps-awg-hub.sh \
     reboot-router.sh; do
     run bash -n "$SKILL_HOME/bin/$script"
     [ "$status" -eq 0 ]
   done
+}
+
+@test "scheduled reboot keeps unrelated cron entries and has safety guards" {
+  installer="$SKILL_HOME/bin/configure-scheduled-reboot.sh"
+  helper="$SKILL_HOME/openwrt/travel-daily-reboot"
+
+  run grep -F 'index($0, marker) == 0 { print }' "$installer"
+  [ "$status" -eq 0 ]
+  run grep -F 'grep -c "$marker" "$cron_file"' "$installer"
+  [ "$status" -eq 0 ]
+  run grep -F 'TRAVEL_DAILY_REBOOT_DRY_RUN=1 "$helper"' "$installer"
+  [ "$status" -eq 0 ]
+  run grep -F 'result="$(ssh_run_remote_with_args /dev/stdin' "$installer"
+  [ "$status" -eq 1 ]
+  run grep -F 'trap on_signal INT TERM HUP' "$installer"
+  [ "$status" -eq 0 ]
+  run grep -F '[ "$now_epoch" -lt 1704067200 ]' "$helper"
+  [ "$status" -eq 0 ]
+  run grep -F '[ "$uptime_seconds" -lt "$minimum_uptime_seconds" ]' "$helper"
+  [ "$status" -eq 0 ]
 }
 
 @test "travel AP button contract is bounded and toggles both bands" {
@@ -84,6 +107,16 @@ setup() {
   [ "$status" -eq 0 ]
 
   run grep -F 'ping -I "$lan_ip"' "$SKILL_HOME/bin/verify-travel-router.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "home route heredoc is not wrapped in an expanding command substitution" {
+  script="$SKILL_HOME/bin/configure-home-travel-route.sh"
+
+  run grep -F 'result="$(ssh_run_remote_with_args /dev/stdin' "$script"
+  [ "$status" -eq 1 ]
+
+  run grep -F 'ssh_run_remote_with_args /dev/stdin \' "$script"
   [ "$status" -eq 0 ]
 }
 

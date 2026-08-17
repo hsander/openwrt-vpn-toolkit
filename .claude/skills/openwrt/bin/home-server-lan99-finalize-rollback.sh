@@ -7,8 +7,8 @@ backup="${1:-}"
 case "$backup" in /var/backups/vpn-kit-lan99-finalize/*) ;; *) exit 13 ;; esac
 [ -f "$backup/files.tar.gz" ]
 
-ethernet_uuid='08428cd5-3e84-37ae-9112-8b9863e956aa'
-wifi_uuid='53486aa4-d172-4d85-b29a-4f5f83ba8df8'
+ethernet_uuid="${HOME_SERVER_ETHERNET_UUID:-00000000-0000-0000-0000-000000000001}"
+wifi_uuid="${HOME_SERVER_WIFI_UUID:-00000000-0000-0000-0000-000000000002}"
 state_dir='/var/lib/vpn-kit-lan99-finalize'
 
 systemctl stop vpn-kit-lan99-finalize-rollback.timer >/dev/null 2>&1 || true

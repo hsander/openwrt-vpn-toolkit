@@ -70,6 +70,17 @@ bin/                   # ← safe API: read-only probe или guarded mutation
   verify-awg2-link.sh # secret-free AWG2 runtime verification
   verify-wifi-uplink.sh # association, DHCP, route, internet and DNS proof
   verify-travel-router.sh # AP/DHCP/LuCI/split-route/site-to-site verification
+  inspect-scheduled-reboot.sh # router time, cron, hardware watchdog and schedule
+  configure-scheduled-reboot.sh # guarded daily reboot without replacing other cron jobs
+  audit-vps-awg-hub.sh # read-only Linux VPS resources/listeners/firewall/AWG capability
+  install-vps-awg-hub.sh # pinned Ubuntu AWG hub on UDP/443, TCP/443 untouched
+  rollback-vps-awg-hub.sh # guarded VPS hub rollback without unsafe live teardown
+  add-vps-awg-peer.sh # add one routed relay peer live without hub restart
+  rollback-vps-awg-peer.sh # remove persistent peer routing; finish volatile cleanup on reboot
+  configure-backup-awg-client.sh # separate awg2/awg3 client, never a default route
+  install-awg-route-failover.sh # hysteretic private-route failover/failback
+  verify-resilient-awg.sh # backup handshake/MTU/route/Internet/resource proof
+  remove-resilient-awg.sh # restore primary route and remove skill-owned backup client
   inspect-lan-migration.sh # read-only migration baseline
   install-lan-migration-runtime.sh # install rollback runtime without network reload
   test-lan-migration-runtime.sh # non-network timer/lock/restore self-test
@@ -157,6 +168,13 @@ openwrt/               # файлы, которые ставятся НА роу
   including live peer updates without restarting the home WAN.
 - Transactional LAN migration with prepare/cutover/confirm/rollback and explicit
   recovery endpoints.
+- Pilot resilient travel routing: direct AWG remains primary; a separate
+  Ubuntu VPS AWG hub on UDP/443 provides backup private-LAN routes with
+  hysteretic failover/failback. This workflow never installs a backup default
+  route and does not modify an existing VLESS/Xray listener on TCP/443.
+- Guarded scheduled daily reboot for travel routers. It preserves unrelated
+  root cron entries, skips an unsynchronised clock and requires at least one
+  hour of uptime.
 
 **НЕ поддержано в V1** — если пользователь просит, агент должен прямо отказаться и сослаться на эту секцию:
 - Прошивка OEM/stock firmware, bootloader recovery и model-specific rescue до
@@ -289,6 +307,34 @@ Restore тоже делает pre-snapshot (двойной), чтобы можн
 `Connect to a new external Wi-Fi / Подключение к новой внешней Wi-Fi сети` в
 `runbooks/12-travel-router.md`.
 
+## Поток "resilient travel failover" (пилот)
+
+Триггер: пользователь хочет сохранить доступ между home LAN и travel LAN при
+отказе прямого AWG, используя отдельный AWG relay на доверенном Ubuntu VPS.
+
+1. Прочитай `runbooks/13-resilient-travel-failover.md` целиком. Сначала докажи
+   обычный travel-профиль и прямой AWG; пилотируй 001 и не переходи к 002 до
+   прохождения полной аварийной матрицы.
+2. Начинай с read-only `audit-vps-awg-hub.sh`, `doctor.sh` и travel inventory.
+   Порядок изменений: VPS hub → home backup client/peer → travel client/peer →
+   watchdog на обоих концах → `verify-resilient-awg.sh` и аварийные тесты.
+3. AWG relay слушает только UDP/443. Не изменяй существующий TCP/443
+   VLESS/Xray. Backup AllowedIPs и watchdog target не могут быть `0.0.0.0/0`;
+   default route и обычный Internet должны оставаться неизменными.
+4. Требуй свежий handshake, MTU payload 16/512/1200, симметричный private route,
+   Internet/DNS, LuCI/SSH, reboot recovery и `MemAvailable >= 20480 KiB`.
+   Проверяй failover и failback отдельно на home и travel сторонах.
+5. Сохраняй snapshot ID и команды rollback после каждого шага. Rollback VPS
+   peer/hub может сообщить `reboot_required=true`: не компенсируй это опасным
+   live peer/interface teardown, а явно планируй reboot VPS.
+6. VLESS reserve — отдельная фаза только для Internet. Он не доказывает доступ
+   в home LAN при блокировке UDP. Private keys, VLESS URL/UUID, Reality keys и
+   пароли нельзя писать в repo, chat, logs, journal или memory.
+7. `configure-scheduled-reboot.sh` используй только после
+   `inspect-scheduled-reboot.sh`; после установки повторно проверь время, cron и
+   reboot recovery. Не считай contract-тесты доказательством live/physical
+   готовности.
+
 ## Escape hatch (raw ssh)
 
 ```
@@ -346,6 +392,7 @@ bin/raw-ssh.sh --router <alias>
 - `11-lan-migration.md` — безопасная миграция LAN с router-local rollback
 - `11-zapret2.md` — установка zapret2, дефолтная стратегия (tcpseg), подбор через blockcheck2
 - `12-travel-router.md` — Travelmate, tablet onboarding, AWG2 site-to-site и reboot proof
+- `13-resilient-travel-failover.md` — direct AWG + relay AWG UDP/443 + отдельный VLESS reserve
 - `99-escape-hatch.md` — когда и как использовать `raw-ssh.sh`
 
 ## Country-pool routing
@@ -357,15 +404,15 @@ memory/<alias>/countries.yaml   # реестр: country → pool → nodes
 lib/country-resolve.sh          # resolve_country_to_pool home usa → usa-pool
 ```
 
-**Текущие пулы (home):**
+**Пример пулов (реальные ноды берутся из `memory/<alias>/countries.yaml`):**
 
 | Страна | Pool tag | Ноды |
 |--------|----------|------|
-| usa | usa-pool | usa-4, usa-6-dev, usa-4-crip |
-| pl | pl-pool | polsha |
-| sg | sg-pool | redshield-sg |
+| usa | usa-pool | node-us-a, node-us-b |
+| pl | pl-pool | node-pl-a |
+| sg | sg-pool | node-sg-a |
 
-**Алиасы:** `us` → usa, `poland` → pl, `polsha` → pl, `singapore` → sg.
+**Алиасы стран:** `us` → usa, `poland` → pl, `singapore` → sg.
 
 **Использование:**
 ```bash
@@ -375,7 +422,7 @@ bin/add-proxy.sh  --router home --port 4010 --outbound usa
 bin/add-vpn.sh    --router home --url "vless://..." --country usa
 ```
 
-`--outbound usa-4` (конкретная нода) по-прежнему работает — backward-compat.
+`--outbound <node-tag>` (конкретная нода) по-прежнему работает — backward-compat.
 
 Подробнее: `runbooks/09-country-pools.md`.
 

@@ -73,7 +73,7 @@ backup_args=(--router "$router" --label "before home travel route" --quiet)
 snapshot_id="$($SCRIPT_DIR/backup-now.sh "${backup_args[@]}")"
 
 set +e
-result="$(ssh_run_remote_with_args /dev/stdin \
+ssh_run_remote_with_args /dev/stdin \
   "$interface" "$peer_section" "$travel_subnet" "$route_section" \
   "$client_tunnel_ip" "$home_lan_ip" <<'REMOTE_SH'
 set -eu
@@ -171,7 +171,6 @@ echo "client_tunnel_ping=ok"
 echo "home_lan_to_travel_router_ping=ok"
 echo "wan_ipv4=$wan_ip"
 REMOTE_SH
-)"
 rc=$?
 set -e
 
@@ -180,6 +179,5 @@ if [ "$rc" -ne 0 ]; then
   exit 20
 fi
 
-printf '%s\n' "$result"
 echo "snapshot=$snapshot_id"
 memory_journal_append "$router" "home_travel_route_configured"

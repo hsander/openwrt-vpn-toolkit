@@ -39,8 +39,8 @@ revision: 0
 
 | Tag | Type | Host:port | Region | In auto-failover | Mixed-port |
 |-----|------|-----------|--------|:----------------:|:----------:|
-| polsha | vless | 45.84.0.174:443 | _?_ | yes | 4000 |
-| usa-4 | vless | 107.174.85.239:443 | _?_ | yes | 4001 |
+| node-pl-a | vless | 198.51.100.10:443 | _?_ | yes | 4000 |
+| node-us-a | vless | 198.51.100.11:443 | _?_ | yes | 4001 |
 
 ## auto-failover
 
@@ -64,12 +64,12 @@ revision: 0
 
 | Port | Outbound | Purpose | Listen IP |
 |------|----------|---------|-----------|
-| 4000 | polsha | adopted | 192.168.1.1 |
-| 4001 | usa-4 | adopted | 192.168.1.1 |
+| 4000 | node-pl-a | adopted | 192.0.2.1 |
+| 4001 | node-us-a | adopted | 192.0.2.1 |
 
 ## How to use
 
-curl --proxy http://192.168.1.1:4000 https://api.ipify.org
+curl --proxy http://192.0.2.1:4000 https://api.ipify.org
 EOF
 }
 
@@ -79,13 +79,13 @@ EOF
   local f="$TEST_TMPDIR/vpns.md"
   make_adopted_vpns_md "$f"
 
-  local new_row="| sg-2 | vless | 83.147.234.220:443 | sg | yes | 4010 |"
+  local new_row="| node-sg-b | vless | 198.51.100.12:443 | sg | yes | 4010 |"
   run_table_insert_awk "$f" "$new_row" > "$TEST_TMPDIR/result.md"
 
   grep -qF "$new_row" "$TEST_TMPDIR/result.md"
 
   local line_new line_header
-  line_new=$(grep -n "sg-2" "$TEST_TMPDIR/result.md" | cut -d: -f1)
+  line_new=$(grep -n "node-sg-b" "$TEST_TMPDIR/result.md" | cut -d: -f1)
   line_header=$(grep -n "^## auto-failover" "$TEST_TMPDIR/result.md" | cut -d: -f1)
   [ "$line_new" -lt "$line_header" ]
 }
@@ -94,11 +94,11 @@ EOF
   local f="$TEST_TMPDIR/vpns.md"
   make_adopted_vpns_md "$f"
 
-  local new_row="| sg-2 | vless | 83.147.234.220:443 | sg | yes | 4010 |"
+  local new_row="| node-sg-b | vless | 198.51.100.12:443 | sg | yes | 4010 |"
   run_table_insert_awk "$f" "$new_row" > "$TEST_TMPDIR/result.md"
 
   local line_new prev_line
-  line_new=$(grep -n "sg-2" "$TEST_TMPDIR/result.md" | cut -d: -f1)
+  line_new=$(grep -n "node-sg-b" "$TEST_TMPDIR/result.md" | cut -d: -f1)
   prev_line=$(sed -n "$((line_new - 1))p" "$TEST_TMPDIR/result.md")
   [[ "$prev_line" == \|* ]]
 }
@@ -107,7 +107,7 @@ EOF
   local f="$TEST_TMPDIR/vpns.md"
   make_adopted_vpns_md "$f"
 
-  run_table_insert_awk "$f" "| sg-2 | vless | 83.147.234.220:443 | sg | yes | 4010 |" \
+  run_table_insert_awk "$f" "| node-sg-b | vless | 198.51.100.12:443 | sg | yes | 4010 |" \
     > "$TEST_TMPDIR/result.md"
 
   grep -q "## auto-failover" "$TEST_TMPDIR/result.md"
@@ -119,7 +119,7 @@ EOF
   local f="$TEST_TMPDIR/proxies.md"
   make_adopted_proxies_md "$f"
 
-  local new_row="| 4010 | sg-2 | via sg-2 | 192.168.1.1 |"
+  local new_row="| 4010 | node-sg-b | via node-sg-b | 192.0.2.1 |"
   run_table_insert_awk "$f" "$new_row" > "$TEST_TMPDIR/result.md"
 
   grep -qF "$new_row" "$TEST_TMPDIR/result.md"
@@ -134,7 +134,7 @@ EOF
   local f="$TEST_TMPDIR/proxies.md"
   make_adopted_proxies_md "$f"
 
-  run_table_insert_awk "$f" "| 4010 | sg-2 | via sg-2 | 192.168.1.1 |" \
+  run_table_insert_awk "$f" "| 4010 | node-sg-b | via node-sg-b | 192.0.2.1 |" \
     > "$TEST_TMPDIR/result.md"
 
   grep -q "## How to use" "$TEST_TMPDIR/result.md"
@@ -145,7 +145,7 @@ EOF
   local f="$TEST_TMPDIR/empty.md"
   printf '# Header\n\nNo nodes yet.\n' > "$f"
 
-  local new_row="| sg-2 | vless | 83.147.234.220:443 | sg | yes | 4010 |"
+  local new_row="| node-sg-b | vless | 198.51.100.12:443 | sg | yes | 4010 |"
   run_table_insert_awk "$f" "$new_row" > "$TEST_TMPDIR/result.md"
 
   grep -qF "$new_row" "$TEST_TMPDIR/result.md"
@@ -156,9 +156,9 @@ EOF
   local f="$TEST_TMPDIR/vpns.md"
   make_adopted_vpns_md "$f"
 
-  local new_row="| sg-2 | vless | 83.147.234.220:443 | sg | yes | 4010 |"
+  local new_row="| node-sg-b | vless | 198.51.100.12:443 | sg | yes | 4010 |"
   run_table_insert_awk "$f" "$new_row" > "$TEST_TMPDIR/result.md"
 
   ! grep -q "vless-reality" "$TEST_TMPDIR/result.md"
-  grep -q "| sg-2 | vless |" "$TEST_TMPDIR/result.md"
+  grep -q "| node-sg-b | vless |" "$TEST_TMPDIR/result.md"
 }
