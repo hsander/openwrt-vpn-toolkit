@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # bin/pin-device.sh — Phase C.1: CLI parse + input validation + outbound verify.
 #
-# Pins a LAN client (by source IP or CIDR) to a specific sing-box outbound by
+# Pins a client (by source IP or CIDR) arriving on a selected input interface
+# to a specific sing-box outbound by
 # inserting a route.rule with `source_ip_cidr` into /etc/sing-box/config.json
 # and a matching nft tproxy mark rule in /etc/init.d/sing-box-tproxy.
 #
@@ -21,6 +22,7 @@
 # Usage:
 #   bin/pin-device.sh --router <alias> --outbound <tag>
 #                     ( --source-ip <ip> | --source-cidr <cidr> )
+#                     [--input-interface <ifname>]
 #                     [--no-backup] [--force] [--allow-ipv6]
 #                     [--writer <id>] [--quiet] [-h|--help]
 #
@@ -53,11 +55,12 @@ usage() {
   cat >&2 <<'EOF'
 Usage: bin/pin-device.sh --router <alias> --outbound <tag>
                          ( --source-ip <ip> | --source-cidr <cidr> )
+                         [--input-interface <ifname>]
                          [--no-backup] [--force] [--allow-ipv6]
                          [--writer <id>] [--quiet]
 
-Жёстко пробрасывает конкретное LAN-устройство/подсеть в конкретный outbound,
-минуя auto-failover.
+Жёстко пробрасывает конкретное устройство/подсеть с выбранного входного
+интерфейса в конкретный outbound, минуя auto-failover.
 
 Required:
   --router <alias>      alias из memory/routers.yaml
@@ -68,6 +71,9 @@ Required:
                         CIDR, накрывающий LAN-сеть, требует --force.
 
 Options:
+  --input-interface <ifname>
+                        входной интерфейс nft tproxy (default: br-lan).
+                        Для tunnel-клиента укажи, например, awg2.
   --no-backup           (testing only) пропустить pre-backup перед apply.
   --force               перезаписать существующее pin-правило / разрешить /0
                         или CIDR, перекрывающий LAN.
@@ -87,6 +93,7 @@ router=""
 outbound=""
 source_ip=""
 source_cidr=""
+input_interface="br-lan"
 no_backup=0
 force=0
 allow_ipv6=0
@@ -99,6 +106,7 @@ while [ $# -gt 0 ]; do
     --outbound)     outbound="${2:-}"; shift 2 ;;
     --source-ip)    source_ip="${2:-}"; shift 2 ;;
     --source-cidr)  source_cidr="${2:-}"; shift 2 ;;
+    --input-interface) input_interface="${2:-}"; shift 2 ;;
     --no-backup)    no_backup=1; shift ;;
     --force)        force=1; shift ;;
     --allow-ipv6)   allow_ipv6=1; shift ;;
@@ -135,6 +143,13 @@ fi
 # Outbound tag shape (same alphabet add-vpn/add-proxy use).
 if ! printf '%s' "$outbound" | grep -qE '^[a-zA-Z0-9_-]+$'; then
   echo "pin-device: невалидный --outbound '$outbound' (a-zA-Z0-9_-)" >&2
+  exit 13
+fi
+
+# Linux interface names are limited to 15 visible bytes. Keep the accepted
+# alphabet narrow because the value is embedded into an nft command.
+if ! printf '%s' "$input_interface" | grep -qE '^[a-zA-Z0-9_.-]{1,15}$'; then
+  echo "pin-device: невалидный --input-interface '$input_interface' (1..15, a-zA-Z0-9_.-)" >&2
   exit 13
 fi
 
@@ -354,6 +369,11 @@ if ! ssh_check_alive 5; then
   exit 2
 fi
 
+if ! ssh_run "ip link show dev $input_interface >/dev/null 2>&1" >/dev/null 2>&1; then
+  echo "pin-device: входной интерфейс '$input_interface' не существует на роутере" >&2
+  exit 13
+fi
+
 # ---------------------------------------------------------------------------
 # LAN-overlap detection (only for --source-cidr v4; v6 LAN detection is TBD).
 # Strategy: uci get network.lan.ipaddr + netmask → derive lan_prefix → compare
@@ -479,7 +499,7 @@ esac
 # ---------------------------------------------------------------------------
 # C.1 done — summary & placeholder for C.2.
 # ---------------------------------------------------------------------------
-say "router=$ROUTER_ALIAS outbound=$outbound source=$final_cidr family=$final_family force=$force writer=$writer"
+say "router=$ROUTER_ALIAS outbound=$outbound source=$final_cidr input_interface=$input_interface family=$final_family force=$force writer=$writer"
 echo "pin-device.sh: C.1 prep done (CLI + validation + outbound verify OK). Apply pipeline lands in C.2."
 
 # === C.2 starts here ===
@@ -939,7 +959,7 @@ case "$family" in
     ;;
 esac
 
-nft_rule_body="iifname br-lan $nft_saddr $source_value meta l4proto { tcp, udp } meta mark set 0x100000 tproxy ip to $tproxy_port accept comment \"$pin_id\""
+nft_rule_body="iifname $input_interface $nft_saddr $source_value meta l4proto { tcp, udp } meta mark set 0x100000 tproxy ip to $tproxy_port accept comment \"$pin_id\""
 
 # ---------------------------------------------------------------------------
 # C.3.3 — Idempotent patch of init.d/sing-box-tproxy.
@@ -1062,6 +1082,7 @@ build_payload() {
     --arg added_at "$added_at" \
     --arg port "$tproxy_port" \
     --arg family "$family" \
+    --arg input_interface "$input_interface" \
     '
     del(._revision, ._last_writer, ._last_writer_host, ._last_updated_at)
     | .dynamic_additions = (
@@ -1072,6 +1093,7 @@ build_payload() {
             type: "lan_client",
             value: $src,
             family: $family,
+            input_interface: $input_interface,
             outbound: $tag,
             tproxy_port: $port,
             added_at: $added_at,

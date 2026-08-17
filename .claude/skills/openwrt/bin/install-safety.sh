@@ -70,6 +70,12 @@ exec /usr/lib/vpn-kit/preflight-safety.sh "$@"
 SH
 chmod 0755 "$usr_sbin/vpn-kit-preflight-safety"
 
+cat > "$usr_sbin/vpn-kit-lan-migrate" <<'SH'
+#!/bin/sh
+exec /usr/lib/vpn-kit/lan-migrate-runtime.sh "$@"
+SH
+chmod 0755 "$usr_sbin/vpn-kit-lan-migrate"
+
 installed_at="$(vpn_kit_now_iso8601)"
 
 sha_file() {
@@ -130,8 +136,9 @@ if [ ! -f "$state_file" ]; then
 fi
 
 if [ -z "$target_root" ] && [ -x "$init_dst" ]; then
-  "$init_dst" enable >/dev/null 2>&1 || true
-  "$init_dst" start >/dev/null 2>&1 || true
+  "$init_dst" enable >/dev/null
+  "$init_dst" restart >/dev/null
+  "$init_dst" running
 fi
 
 jq -n --arg status ok --arg root "${target_root:-/}" --arg lib "$lib_dst" '{status:$status, root:$root, lib:$lib}'

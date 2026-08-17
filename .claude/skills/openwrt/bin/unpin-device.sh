@@ -130,6 +130,7 @@ rollback_now() {
 TAR=\"/etc/vpn-kit/snapshots/${snapshot_id}.tar.gz\"
 [ -f \"\$TAR\" ] || exit 1
 tar -xzf \"\$TAR\" -C /
+/etc/init.d/sing-box-tproxy restart
 " >/dev/null 2>&1 || true
 }
 
@@ -157,6 +158,7 @@ CONFIG='$REMOTE_CONFIG'
 INITD='$REMOTE_INITD'
 STATE='$REMOTE_STATE'
 CIDR='$cidr'
+BARE_IP='$bare_ip'
 PIN_ID='$pin_id'
 
 # 1. config.json
@@ -165,9 +167,19 @@ jq \"del(.route.rules[] | select((.source_ip_cidr // []) | any(. == \\\"\$CIDR\\
 sing-box check -c /tmp/unpin-config.json >/dev/null
 mv -f /tmp/unpin-config.json \"\$CONFIG\"
 
-# 2. init.d — remove nft line with pin comment (if pin_id known)
+# 2. init.d — remove the persistent nft rule. Older hand-written pins have no
+# vpn-kit-pin-* comment, so fall back to an exact source-IP token match.
 if [ -n \"\$PIN_ID\" ]; then
   sed -i \"/\$PIN_ID/d\" \"\$INITD\"
+else
+  INITD_MODE=644
+  [ -x \"\$INITD\" ] && INITD_MODE=755
+  awk -v ip=\"\$BARE_IP\" '
+    index(\$0, \"ip saddr \" ip \" \") || index(\$0, \"ip saddr \" ip \"/32 \") { next }
+    { print }
+  ' \"\$INITD\" > /tmp/unpin-initd
+  chmod \"\$INITD_MODE\" /tmp/unpin-initd
+  mv -f /tmp/unpin-initd \"\$INITD\"
 fi
 
 # 3. install-state.json
@@ -192,6 +204,20 @@ still_present="$(ssh_run "jq -e --arg c '$cidr' \
 if [ "$still_present" = "true" ]; then
   echo "unpin-device: pin всё ещё в конфиге после применения — откатываю" >&2
   rollback_now "pin still present after apply"
+  exit 20
+fi
+
+initd_still_present="$(ssh_run "grep -F 'ip saddr $bare_ip ' $REMOTE_INITD >/dev/null 2>&1 || \
+  grep -F 'ip saddr $bare_ip/32 ' $REMOTE_INITD >/dev/null 2>&1" >/dev/null 2>&1 && echo "true" || echo "false")"
+
+runtime_still_present="$(ssh_run "nft -a list chain inet sing_box_tproxy mangle_prerouting 2>/dev/null | \
+  grep -F 'ip saddr $bare_ip ' >/dev/null 2>&1 || \
+  nft -a list chain inet sing_box_tproxy mangle_prerouting 2>/dev/null | \
+  grep -F 'ip saddr $bare_ip/32 ' >/dev/null 2>&1" >/dev/null 2>&1 && echo "true" || echo "false")"
+
+if [ "$initd_still_present" = "true" ] || [ "$runtime_still_present" = "true" ]; then
+  echo "unpin-device: source rule остался в init.d или runtime nft — откатываю" >&2
+  rollback_now "persistent or runtime nft rule still present after apply"
   exit 20
 fi
 

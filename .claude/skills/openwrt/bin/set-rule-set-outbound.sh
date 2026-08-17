@@ -186,8 +186,10 @@ if ! scp_to "$TMP_CONFIG_NEW" "$REMOTE_NEW" >/dev/null 2>&1; then
   exit 2
 fi
 
-if ! ssh_run "sing-box check -c $REMOTE_NEW" >/dev/null 2>&1; then
+check_output=""
+if ! check_output="$(ssh_run "sing-box check -c $REMOTE_NEW" 2>&1)"; then
   echo "set-rule-set-outbound: sing-box check rejected new config" >&2
+  printf '%s\n' "$check_output" | sed -E 's#vless://[^[:space:]]+#[REDACTED]#g' >&2
   rollback_now "sing-box check failed"
   exit 20
 fi
@@ -202,6 +204,14 @@ if ! ssh_run "/etc/init.d/sing-box-tproxy reload >/dev/null 2>&1 || /etc/init.d/
   echo "set-rule-set-outbound: service reload failed" >&2
   rollback_now "service reload failed"
   exit 20
+fi
+
+# FakeIP cache maps domain -> real IP -> outbound. A bare reload keeps serving
+# already-resolved domains through the OLD outbound until the cache entry
+# expires, silently undoing the switch we just made. Must clear + restart
+# every time, not just on hot-reload.
+if ! ssh_run "rm -f /usr/share/sing-box/cache.db && /etc/init.d/sing-box-tproxy restart" >/dev/null 2>&1; then
+  echo "set-rule-set-outbound: FakeIP cache reset failed — переключение применено, но старые соединения могут ещё идти через прежний outbound. Сбрось вручную: rm -f /usr/share/sing-box/cache.db && /etc/init.d/sing-box-tproxy restart" >&2
 fi
 
 if ! memory_journal_append "$ROUTER_ALIAS" "set_rule_set_outbound" \

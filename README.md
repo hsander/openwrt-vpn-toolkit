@@ -1,6 +1,8 @@
 # openwrt-skill
 
-**AI-powered OpenWrt router management** — configure VPN, bypass censorship, and keep YouTube working, all by just chatting with Claude. No networking skills required.
+**AI-powered OpenWrt router management** — configure VPN and routing, migrate a
+LAN safely, or build a travel router that joins hotel Wi-Fi while preserving
+private Wi-Fi and access to your home network.
 
 > [Документация на русском →](./README.ru.md)
 
@@ -14,6 +16,7 @@ You open this project in Claude Code and simply say:
 > *"YouTube stopped working, fix it"*  
 > *"Route my TV through the US server"*  
 > *"Add Instagram to the bypass list"*
+> *"Turn router 001 into a travel router and connect it to my phone hotspot"*
 
 Claude handles everything: connects to the router over SSH, makes a backup, applies the change safely, and rolls back automatically if something goes wrong.
 
@@ -24,6 +27,7 @@ Claude handles everything: connects to the router over SSH, makes a backup, appl
 - People in countries with internet censorship (Russia, Iran, China, Belarus, UAE, ...)
 - Anyone who wants **YouTube, Instagram, Telegram, Twitter** to just work
 - People who want a **VPN on the router level** — so every device at home is covered without installing anything
+- Travellers who want one trusted private Wi-Fi network in hotels and remote access to their home LAN
 - Developers and sysadmins who manage OpenWrt routers and want AI automation
 
 **No networking knowledge required.** You don't need to know what sing-box, VLESS, Reality, tproxy, or nftables are. Claude knows.
@@ -35,7 +39,7 @@ Claude handles everything: connects to the router over SSH, makes a backup, appl
 | | |
 |---|---|
 | Router | OpenWrt 23.05+ (tested on 24.10 / 25.x) |
-| VPN | A VLESS/Reality server (e.g. from a VPS or a VPN provider) |
+| VPN (optional) | A VLESS/Reality server for policy routing; an existing AWG2 endpoint for home-to-travel access |
 | Agent machine | macOS or Linux with Claude Code installed |
 | Claude | Claude Code CLI ([claude.ai/code](https://claude.ai/code)) |
 
@@ -53,6 +57,38 @@ Claude handles everything: connects to the router over SSH, makes a backup, appl
 | Telegram watchdog alerts | Get notified if the router loses internet or VPN breaks |
 | Safe config changes with auto-rollback | Every change is snapshotted; if SSH drops after a restart, it rolls back |
 | Add/remove domains from VPN list | Without restarting sing-box |
+| Travel router profile | Creates an uncommon private LAN, dual-band private AP, Travelmate uplinks, and persistent LuCI access |
+| Join hotel Wi-Fi from a phone/tablet | Add or change the external Wi-Fi in LuCI without a laptop |
+| Hidden private Wi-Fi with physical recovery | A short Wireless Pairing press exposes MobileHub for 10 minutes; press again to hide it now |
+| Home ↔ travel access over AWG2 | Routes only the home LAN through the tunnel; ordinary internet stays on the local uplink |
+| Safe LAN subnet migration | Uses prepare/cutover/confirm/rollback with recovery endpoints instead of a one-shot address change |
+
+The safe API starts after OpenWrt is installed. Flashing vendor firmware,
+bootloader recovery, and model-specific rescue procedures are not yet automated
+and must not be inferred from the travel-router workflow.
+
+---
+
+## Travel router: connect to a new Wi-Fi
+
+1. Power on the router. If MobileHub is hidden, briefly press the physical
+   `Wireless Pairing` button: both bands become visible for 10 minutes.
+2. Connect your phone/tablet to MobileHub, then open LuCI at the router's travel address, for example
+   `http://172.27.1.1` for router 001 (or HTTPS if it was configured explicitly).
+3. Open `Services -> Travelmate`, scan, choose the hotel or hotspot SSID, enter
+   its password, and select `Save & Apply`.
+4. If the hotel has a captive portal, remain on the private Wi-Fi and open a
+   plain HTTP page such as `http://neverssl.com` to complete the login.
+5. Open a normal website. The saved uplink will reconnect automatically after
+   reboot while access to the home LAN continues through AWG2.
+
+If MobileHub is already visible, another short Wireless Pairing press hides both
+bands immediately. A hidden SSID is only a convenience/visibility feature, not
+a security boundary; WPA2 and its password remain the actual protection.
+
+Use 2.4 GHz for range and 5 GHz for speed. Unknown open networks are never added
+automatically. Full setup and verification procedure:
+[`12-travel-router.md`](./.claude/skills/openwrt/runbooks/12-travel-router.md).
 
 ---
 
@@ -94,13 +130,22 @@ You (chat) → Claude → bin/*.sh scripts → SSH → OpenWrt router
                     update local memory files
 ```
 
-**Claude never runs raw SSH commands.** Every operation goes through a script in `bin/` that does: backup → validate → apply → verify → update memory. If the router becomes unreachable after a restart, the previous snapshot is restored automatically.
+Routine operations go through scripts in `bin/` that perform backup, validation,
+apply, verification, and memory updates. Direct SSH is available only through the
+audited `raw-ssh.sh` escape hatch after explicit user confirmation. If the router
+becomes unreachable after a staged restart, the previous snapshot is restored.
 
 The VPN stack:
 - **sing-box** (VLESS + Reality) — the actual VPN tunnel
 - **tproxy + nftables** — intercepts traffic at the router level, no client config needed
 - **sing-box FakeIP DNS** — routes domains to VPN without leaking DNS queries
 - **zapret** (optional) — deep packet inspection bypass for extra stubborn blocks
+
+The travel stack:
+- **Travelmate + LuCI** — select and remember hotel/hotspot uplinks from a phone or tablet
+- **Permanent private AP** — client devices keep using one trusted SSID
+- **AmneziaWG 2 site-to-site** — management and home-LAN access over a separate tunnel
+- **Split routing** — only home-LAN traffic uses AWG2; ordinary internet uses the local uplink
 
 ---
 
@@ -131,6 +176,10 @@ The VPN stack:
 │   ├── add-ip.sh     # Add IP subnet route
 │   ├── backup-now.sh # Manual snapshot
 │   ├── restore.sh    # Rollback to snapshot
+│   ├── install-travelmate.sh       # Install Travelmate and its LuCI application
+│   ├── configure-travel-router.sh  # Private AP, unique LAN and split route
+│   ├── configure-home-travel-route.sh # Reverse route on the home router
+│   ├── verify-travel-router.sh     # End-to-end and post-reboot proof
 │   └── ...
 ├── lib/              # Shared helpers (sourced by bin/, not called directly)
 ├── memory/           # Per-router state: routers.yaml + <alias>/*.md

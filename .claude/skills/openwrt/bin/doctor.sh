@@ -373,7 +373,10 @@ count_md_table_rows() {
   local md="$1"
   [ -f "$md" ] || { echo "—"; return 0; }
   awk '
-    BEGIN { n = 0 }
+    BEGIN { n = 0; in_active = 0 }
+    /^## Активные/ { in_active = 1; next }
+    in_active && /^## / { in_active = 0 }
+    !in_active { next }
     /^\|[[:space:]]*-+/ { next }       # separator |---|---|
     /^\|[[:space:]]*:?-+/ { next }     # separator |:---|
     /^\| *IP \/ CIDR / { next }        # subnets header
@@ -469,7 +472,7 @@ $( [ -n "$degraded_banner" ] && printf '> %s\n' "$degraded_banner" )
 
 - **Активных pin'ов:** $pins_count
 - Источник: [\`pins.md\`](./pins.md)
-- Управление: \`bin/pin-device.sh\` (\`unpin-device.sh\` TBD — откат через \`raw-ssh.sh\` или \`restore.sh\`)
+- Управление: \`bin/pin-device.sh\` / \`bin/unpin-device.sh\`
 
 ## Rule-set domain routes
 

@@ -1,8 +1,10 @@
-# Runbook 08 — Pin LAN-устройства на конкретный outbound
+# Runbook 08 — Pin source-устройства на конкретный outbound
 
 ## Когда использовать
 
-Триггеры от пользователя: «всегда через DE для моего ноута 192.168.1.158», «pin device X на outbound Y», «conn по source IP», «192.168.1.X должен ходить через Германию», «закрепи телек за нодой US», «весь VLAN гостей в outbound guests-de».
+Триггеры: «всегда через DE для моего ноута 192.168.99.158», «pin device X на
+outbound Y», «клиент из AWG должен идти через VPN», «закрепи телек за нодой US»,
+«весь VLAN гостей в outbound guests-de».
 
 Pre-conditions (что должно быть в `memory/<alias>/state.md`):
 - Пункт 11 «`config.json` валиден» = ✅
@@ -14,7 +16,9 @@ Pre-conditions (что должно быть в `memory/<alias>/state.md`):
 
 Различие:
 - `add-ip.sh` — заворачивает **destination IP** в VPN (через общий `proxy_subnets` set; маршрутизируется через auto-failover).
-- `pin-device.sh` — заворачивает **source IP** (LAN-клиент) на **конкретный outbound** (минуя auto-failover). Это two-way: и для отдельного устройства, и для всей подсети.
+- `pin-device.sh` — заворачивает **source IP** на **конкретный outbound**,
+  минуя auto-failover. По умолчанию принимает трафик с `br-lan`, но может
+  использовать явный `--input-interface` для AWG/VLAN/tunnel ingress.
 
 ## Шаг 1. Что спросить у пользователя
 
@@ -26,6 +30,11 @@ Pre-conditions (что должно быть в `memory/<alias>/state.md`):
 2. **Outbound tag (обязательно).** Должен быть в `memory/<alias>/vpns.md` (`pin-device.sh` сам проверит через `jq` на роутере). Если пользователь сказал «через Германию» — найди соответствующий tag в `vpns.md` и подтверди.
 
 3. **Если outbound = `direct`** (т.е. отключить VPN для устройства) — это валидный use-case (например, smart-TV который не должен ходить через VPN из-за geo-блокировок). Но **переспроси**: «`direct` — это значит **выключить VPN** для этого устройства. Правильно понял?»
+
+4. **Input interface.** Default — `br-lan`. Если source приходит из AWG, VLAN
+   или другого tunnel interface, сначала докажи его точное имя и передай
+   `--input-interface <ifname>`. Скрипт проверяет существование интерфейса и
+   принимает только безопасный Linux ifname длиной до 15 символов.
 
 ### Валидация source локально (до запуска скрипта)
 - IPv4 формат — стандартная dotted-quad, октеты 0-255.
@@ -39,35 +48,42 @@ Pre-conditions (что должно быть в `memory/<alias>/state.md`):
 - IPv6 — только с `--allow-ipv6`, и init.d должен содержать `ip6 saddr|ip6 daddr` правила (иначе exit 13).
 
 ### Спец-случай: подсеть пользователя ⊇ LAN
-Если `--source-cidr` накрывает LAN (например, `0.0.0.0/0` или `192.168.0.0/16` при LAN `192.168.1.0/24`) — `pin-device.sh` сам откажет с exit 13. Это значит **весь LAN, включая роутер, уйдёт в outbound** — путь к разрыву SSH. С `--force` пропустит, но это почти всегда ошибка — для «весь LAN через VPN» правильнее `add-ip --ip <LAN-CIDR>` (см. `07-add-ip.md`), а не pin-device.
+Если `--source-cidr` накрывает LAN (например, `0.0.0.0/0` или
+`192.168.0.0/16` при LAN `192.168.99.0/24`) — `pin-device.sh` сам откажет с
+exit 13. Это может завернуть весь LAN и разорвать SSH. `--force` допустим только
+по явному запросу.
 
 ## Шаг 2. Выполнение
 
 Single device:
 ```bash
-bin/pin-device.sh --router <alias> --outbound <tag> --source-ip <ip>
+bin/pin-device.sh --router <alias> --outbound <tag> --source-ip <ip> \
+  [--input-interface <ifname>]
 ```
 
 Subnet:
 ```bash
-bin/pin-device.sh --router <alias> --outbound <tag> --source-cidr <cidr> [--force]
+bin/pin-device.sh --router <alias> --outbound <tag> --source-cidr <cidr> \
+  [--input-interface <ifname>] [--force]
 ```
 
 Опции:
 - `--force` — (a) перепишет существующий pin для того же source (без `--force` exit 13 «уже привязан к outbound X»), (b) разрешит `/0` catch-all или CIDR ⊇ LAN. НЕ используй сам, спроси пользователя.
 - `--allow-ipv6` — IPv6 source. По умолчанию только IPv4.
+- `--input-interface` — ingress для persistent/runtime nft rule; default `br-lan`.
 - `--no-backup` — **только для тестов**. Rollback недоступен без snapshot'а.
 
 Что делает:
 1. Валидация CLI + source (IPv4/CIDR, bogon refuse, LAN-overlap для `--source-cidr`).
-2. SSH preflight + verify что outbound существует в `/etc/sing-box/config.json` (через `jq` на роутере).
+2. SSH preflight + verify outbound и существование выбранного input interface.
 3. snapshot (`backup-now.sh`) → `snapshot_id`.
 4. CAS preflight install-state + ownership-expand (добавляет `config.json` в `files_owned_by_skill`).
 5. Drift-check `config.json` через `adopted_config_sha256` (exit 30 без `--force`).
 6. Idempotency: если pin уже есть на тот же outbound → no-op (exit 0). На другой outbound → exit 13 без `--force` / overwrite с `--force`.
 7. `jq` mutation: вставляет `{action:"route", source_ip_cidr:[<src>], outbound:<tag>}` в `.route.rules` **перед catch-all rule**.
 8. `sing-box check` на роутере → atomic mv в `/etc/sing-box/config.json`.
-9. Patch `/etc/init.d/sing-box-tproxy`: вставляет `nft add rule ... <pin_id>` **перед FakeIP rule**. Comment-based idempotency (`vpn-kit-pin-<sha256(src)[:12]>`).
+9. Patch `/etc/init.d/sing-box-tproxy`: вставляет `nft add rule iifname
+   <input-interface> ... <pin_id>` **перед FakeIP rule**.
 10. Atomic mv init.d.
 11. Runtime `nft insert rule ... position <fakeip_handle>` — нужно чтобы порядок persistent==runtime.
 12. CAS-write `install-state.dynamic_additions[]` с retry ×3.
@@ -87,7 +103,7 @@ Exit codes:
 
 ## Шаг 3. Подтверждение
 
-- Output показывает `source`, `outbound`, `pin_id` (`vpn-kit-pin-<hash>`), `snapshot`, `tproxy_port`.
+- Output показывает `source`, `input_interface`, `outbound`, `pin_id`, snapshot и tproxy port.
 - Прочитай `memory/<alias>/pins.md` — должна появиться новая строка с source, scope (device/subnet), outbound, pin_id, временем, origin.
 - **Пользователь тестирует с устройства**: `curl --interface <pin-ip> https://api.ipify.org` (или с самого устройства просто `curl https://api.ipify.org`) — должен вернуть exit IP outbound'а, а не дефолтный.
 
@@ -97,7 +113,10 @@ Exit codes:
 
 (Симметрично «реальный инцидент» секции из `03-add-vpn.md` — pin-device может разорвать SSH сильнее чем add-vpn.)
 
-1. **Source pin'а — ТОЛЬКО из LAN-диапазона роутера.** Если `<ip>` не в `network.lan.ipaddr/network.lan.netmask` — пакеты от него никогда не дойдут до tproxy chain (mangle_prerouting срабатывает только на LAN-входящих). Pin будет «висеть» в config'е без эффекта. `pin-device.sh` сам **не** проверяет это (только LAN-overlap для `--source-cidr`); ты должен проверить сам через `vpns.md` / `network.lan.ipaddr`. Если `<ip>` не из LAN — переспроси: «`<ip>` не из LAN роутера (`192.168.1.0/24`). Pин не сработает — pакеты не дойдут до tproxy. Уверен?»
+1. **Source должен реально приходить через выбранный ingress.** Для default
+   `br-lan` проверь LAN subnet. Для AWG/VLAN/tunnel source может быть не из LAN,
+   но route и firewall должны доставлять его на указанный interface. Не создавай
+   pin только потому, что интерфейс существует — докажи packet path.
 
 2. **CIDR ⊇ LAN требует `--force`** (скрипт C.1 проверяет автоматически). Если пользователь хочет «весь LAN через VPN» — это `add-ip --ip <LAN-CIDR> --force` (см. `07-add-ip.md`), а не pin-device. pin-device на LAN-superset = SSH-suicide.
 
@@ -113,7 +132,8 @@ Exit codes:
 
 ## Что обновляется в memory/
 
-- `memory/<alias>/pins.md` — новая строка (source, scope, outbound, pin_id, время, origin).
+- `memory/<alias>/pins.md` — новая строка из install-state; input interface
+  хранится в `dynamic_additions[]` и используется при восстановлении правила.
 - `memory/<alias>/journal.jsonl` — событие `pin_device` (`source_ip`, `outbound`, `snapshot_before`, `pin_id`, `tproxy_port`, `revision`).
 - `state.md` и `vpns.md` **не меняются** (outbound уже существует, мы только добавили route.rule).
 
@@ -148,7 +168,7 @@ Exit codes:
 
 ## НЕ ДЕЛАТЬ
 
-- НЕ pin'ить IP, который не из LAN роутера (бесполезно — пакеты не дойдут до tproxy chain).
+- НЕ использовать default `br-lan` для AWG/VLAN source и не угадывать interface.
 - НЕ pin'ить `--source-cidr 0.0.0.0/0` или CIDR ⊇ LAN без явного запроса пользователя и **громкого** предупреждения про SSH-suicide.
 - НЕ pin'ить device на outbound, который сам = `direct`, без переспроса (это **отключение** VPN для устройства — валидно, но редко; убедись что пользователь это понимает).
 - НЕ запускать `--force` для overwrite существующего pin без явного запроса пользователя.

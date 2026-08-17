@@ -57,8 +57,10 @@ bin/set-rule-set-outbound.sh --router home --rule-set spotify-usa --outbound usa
 5. guard: количество `route.rules` до/после не должно измениться;
 6. guard: все найденные matching rules должны получить новый outbound;
 7. `sing-box check`;
-8. atomic apply + hot-reload;
-9. journal event `set_rule_set_outbound`.
+8. atomic apply + reload;
+9. удаляет FakeIP `cache.db` и перезапускает `sing-box-tproxy`, чтобы уже
+   разрешённые домены не продолжили идти через старый outbound;
+10. journal event `set_rule_set_outbound`.
 
 Exit codes:
 - `0` — применено.
@@ -66,6 +68,10 @@ Exit codes:
 - `13` — rule-set не найден, outbound не найден, локальный guard не прошёл.
 - `20` — remote validation/reload failed, snapshot restored.
 - `64` — bad CLI args.
+
+Если reset/restart FakeIP-кэша не удался, скрипт сообщает warning: изменение
+конфига уже применено, но старые соединения могут временно использовать прежний
+outbound. Запусти `bin/health.sh` и `bin/logs.sh`; не исправляй это скрытым raw SSH.
 
 ## Шаг 3. Подтверждение
 

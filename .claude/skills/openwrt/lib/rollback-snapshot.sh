@@ -50,9 +50,11 @@ while [ "$i" -lt "$count" ]; do
   path="$(jq -r ".files[$i].path" "$meta")"
   existed="$(jq -r ".files[$i].existed" "$meta")"
   backup="$(jq -r ".files[$i].backup // \"\"" "$meta")"
+  mode="$(jq -r ".files[$i].mode // \"\"" "$meta")"
   if [ "$existed" = "true" ]; then
     mkdir -p "$(dirname "$path")"
-    cp "$snapshot/$backup" "$path"
+    cp -p "$snapshot/$backup" "$path"
+    [ -z "$mode" ] || chmod "$mode" "$path"
   else
     rm -f "$path"
   fi
@@ -64,7 +66,8 @@ if [ -n "$rollback_command" ]; then
   sh -c "$rollback_command"
 fi
 
-if [ -f "$snapshot/state-before.json" ]; then
+restore_state="$(jq -r 'if has("restore_state") then .restore_state else true end' "$meta")"
+if [ "$restore_state" = true ] && [ -f "$snapshot/state-before.json" ]; then
   cur_rev=0
   if [ -f "$VPN_KIT_STATE_FILE" ]; then
     cur_rev="$(jq -r '._revision // 0' "$VPN_KIT_STATE_FILE" 2>/dev/null || echo 0)"

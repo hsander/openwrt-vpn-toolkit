@@ -37,8 +37,10 @@ tick_once() {
     step_id="$(jq -r '.step_id' "$timer")"
     deadline="$(jq -r '.deadline_unix' "$timer")"
     snapshot_path="$(jq -r '.snapshot_path' "$timer")"
+    handler_command="$(jq -r '.handler_command // ""' "$timer")"
+    timer_type="$(jq -r '.timer_type // "generic"' "$timer")"
 
-    if [ -f "$VPN_KIT_STATE_FILE" ] && jq -e --arg step "$step_id" \
+    if [ "$timer_type" != lan_migration ] && [ -f "$VPN_KIT_STATE_FILE" ] && jq -e --arg step "$step_id" \
       '(.committed_steps // []) | any(.step_id == $step)' "$VPN_KIT_STATE_FILE" >/dev/null 2>&1; then
       rm -f "$timer"
       "$SCRIPT_DIR/snapshot-gc.sh" --delete-success "$snapshot_path" >/dev/null 2>&1 || true
@@ -52,8 +54,16 @@ tick_once() {
     esac
 
     if [ "$now" -ge "$deadline" ]; then
-      "$SCRIPT_DIR/rollback-snapshot.sh" --snapshot "$snapshot_path" --step-id "$step_id" --triggered-by timer
-      rm -f "$timer"
+      if [ -n "$handler_command" ]; then
+        if sh -c "$handler_command"; then
+          rm -f "$timer"
+        else
+          echo "vpn-kit-rollback: handler failed for $step_id; timer remains armed" >&2
+        fi
+      else
+        "$SCRIPT_DIR/rollback-snapshot.sh" --snapshot "$snapshot_path" --step-id "$step_id" --triggered-by timer
+        rm -f "$timer"
+      fi
     fi
   done
 }

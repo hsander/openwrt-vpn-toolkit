@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -u
+token="$1"
+delay="$2"
+token_file=/tmp/travel-ap-button/token
+
+sleep "$delay"
+[ -r "$token_file" ] || exit 0
+[ "$(cat "$token_file" 2>/dev/null)" = "$token" ] || exit 0
+
+uci set wireless.travel_ap_24.hidden='1'
+uci set wireless.travel_ap_5.hidden='1'
+uci commit wireless
+wifi reload >/dev/null 2>&1 || true
+rm -f "$token_file"
+logger -t travel-ap-button "private AP hidden after visibility window"

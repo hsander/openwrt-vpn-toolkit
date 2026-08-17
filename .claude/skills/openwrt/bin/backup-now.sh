@@ -14,7 +14,8 @@
 #   6. Print snapshot ID to stdout for capture by callers.
 #
 # Usage:
-#   bin/backup-now.sh --router <alias> [--label <text>] [--quiet] [--no-prune]
+#   bin/backup-now.sh --router <alias> [--ssh-alias <alias>]
+#     [--label <text>] [--quiet] [--no-prune]
 #
 # Exit codes:
 #   0   ok
@@ -90,13 +91,14 @@ _reject_label() {
 
 usage() {
   cat >&2 <<'EOF'
-Usage: bin/backup-now.sh --router <alias> [--label <text>] [--quiet] [--no-prune]
+Usage: bin/backup-now.sh --router <alias> [--ssh-alias <alias>] [--label <text>] [--quiet] [--no-prune]
 
 Снимает tar.gz-snapshot ключевых файлов роутера (sing-box, init.d, /etc/config,
 nftables, watchdogs, install-state) в /etc/vpn-kit/snapshots/ на роутере.
 
 Options:
   --router <alias>   alias из memory/routers.yaml (обязателен)
+  --ssh-alias <name> использовать доверенный SSH alias вместо registry host
   --label <text>     произвольная метка (без секретов). По умолчанию пусто.
   --quiet            не печатать summary в stderr
   --no-prune         не удалять старые снимки
@@ -107,6 +109,7 @@ EOF
 }
 
 router=""
+ssh_alias_override=""
 label=""
 quiet=0
 no_prune=0
@@ -114,6 +117,7 @@ no_prune=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --router) router="${2:-}"; shift 2 ;;
+    --ssh-alias) ssh_alias_override="${2:-}"; shift 2 ;;
     --label)  label="${2:-}"; shift 2 ;;
     --quiet)  quiet=1; shift ;;
     --no-prune) no_prune=1; shift ;;
@@ -137,6 +141,15 @@ fi
 
 # --- Resolve router + SSH alive ------------------------------------------------
 resolve_router_config "$router"
+
+if [ -n "$ssh_alias_override" ]; then
+  [[ "$ssh_alias_override" =~ ^[A-Za-z0-9_.-]{1,64}$ ]] || {
+    echo "backup-now: invalid --ssh-alias" >&2
+    exit 13
+  }
+  ROUTER_SSH_ALIAS="$ssh_alias_override"
+  export ROUTER_SSH_ALIAS
+fi
 
 if ! ssh_check_alive 5; then
   cat >&2 <<EOF
@@ -186,12 +199,15 @@ for p in \
   /opt/zapret2/ipset/zapret-ip-user-exclude.txt \
   /etc/config/firewall \
   /etc/config/network \
+  /etc/config/wireless \
   /etc/config/dhcp \
   /etc/config/https-dns-proxy \
+  /etc/rc.button \
   /etc/nftables.d \
   /etc/crontabs/root \
   /etc/dnsmasq.conf \
   /etc/router-watchdog.conf \
+  /etc/travel-ap-button.conf \
   /etc/vpn-kit/install-state.json \
   /etc/vpn-kit/firewall \
   /etc/vpn-kit/cron \
@@ -202,6 +218,8 @@ do
     printf '%s\n' "$p" >> "$LIST"
   fi
 done
+
+[ -e /usr/libexec/travel-ap-autohide ] && printf '%s\n' /usr/libexec/travel-ap-autohide >> "$LIST"
 
 # Glob for watchdog scripts (may be empty).
 for f in /usr/bin/*-watchdog.sh; do

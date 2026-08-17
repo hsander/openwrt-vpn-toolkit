@@ -16,7 +16,9 @@
 | [`08-pin-device.md`](./08-pin-device.md) | Pin LAN-устройства (source-ip/CIDR) на конкретный outbound (route.rules + nft tproxy) | ✅ |
 | [`09-country-pools.md`](./09-country-pools.md) | Страны как единица маршрутизации (usa-pool, pl-pool, sg-pool) | ✅ |
 | [`10-set-rule-set-outbound.md`](./10-set-rule-set-outbound.md) | Переключить существующий rule-set/service route на другой outbound без ручного `config.json` | ✅ |
+| [`11-lan-migration.md`](./11-lan-migration.md) | Транзакционная миграция LAN: prepare → cutover → confirm или автоматический rollback | ✅ |
 | [`11-zapret2.md`](./11-zapret2.md) | zapret2: установка (remittor), дефолтная стратегия tcpseg, подбор через blockcheck2, DPI-обход YouTube | ✅ |
+| [`12-travel-router.md`](./12-travel-router.md) | Travelmate, внешние Wi-Fi с телефона/планшета, скрытый MobileHub с Wireless Pairing, AWG2 и reboot proof | ✅ |
 | [`99-escape-hatch.md`](./99-escape-hatch.md) | Когда и как использовать `bin/raw-ssh.sh` (требует явное «yes») | ✅ |
 
 ## Структура каждого runbook'а

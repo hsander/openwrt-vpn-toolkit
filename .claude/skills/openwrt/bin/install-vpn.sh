@@ -329,7 +329,7 @@ remote_cmd="set -eu
 '$remote_root/bin/install-minimal.sh' \\
   --vless-url-file '$url_remote' \\
   --node-name '$tag' \\
-  --listen '192.168.1.1' \\
+  --listen '192.168.99.1' \\
   --port '$effective_port' \\
   --writer '$writer' \\
   $activate_flag
@@ -337,7 +337,7 @@ rc=\$?
 rm -f '$url_remote'
 exit \$rc"
 
-echo "install-vpn: запускаю install-minimal.sh на роутере (tag=$tag, listen=192.168.1.1:$effective_port, activate=$([ -n "$activate_flag" ] && echo yes || echo no))..." >&2
+echo "install-vpn: запускаю install-minimal.sh на роутере (tag=$tag, listen=192.168.99.1:$effective_port, activate=$([ -n "$activate_flag" ] && echo yes || echo no))..." >&2
 
 install_rc=0
 install_out="$(ssh_run "$remote_cmd" 2>&1)" || install_rc=$?
@@ -443,7 +443,7 @@ fi
 # Append row to proxies.md if --add-proxy-port was given.
 if [ -n "$proxy_port" ]; then
   proxies_md="$OPENWRT_SKILL_MEMORY/$ROUTER_ALIAS/proxies.md"
-  proxy_row="| $proxy_port | $tag | LAN mixed inbound | 192.168.1.1 |"
+  proxy_row="| $proxy_port | $tag | LAN mixed inbound | 192.168.99.1 |"
   if [ -f "$proxies_md" ]; then
     if grep -q '{{PROXY_TABLE_ROWS}}' "$proxies_md"; then
       tmp_md="$proxies_md.tmp.$$"
@@ -494,7 +494,7 @@ cat >&2 <<EOF
 install-vpn: успех — VPN '$tag' поднят на '$ROUTER_ALIAS'.
   endpoint:   $vpn_host:$vpn_port  (секреты остались в /etc/sing-box/config.json на роутере, chmod 600)
   tag:        $tag$([ -n "$proxy_port" ] && echo "
-  proxy:      mixed-inbound на 192.168.1.1:$proxy_port")
+  proxy:      mixed-inbound на 192.168.99.1:$proxy_port")
 $([ "$dry_run" = "1" ] && echo "  ⚠ dry-run — пакеты не ставились, сервис не стартовал.")
 
 Следующие шаги:

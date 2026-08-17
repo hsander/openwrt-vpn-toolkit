@@ -12,7 +12,7 @@
 #
 # Usage:
 #   bin/add-proxy.sh --router <alias> --port <port> --outbound <tag>
-#                    [--listen 192.168.1.1] [--no-backup]
+#                    [--listen 192.168.99.1] [--no-backup]
 #
 # Exit codes:
 #   0   ok
@@ -47,7 +47,7 @@ Options:
   --router <alias>     alias из memory/routers.yaml (обяз.)
   --port <port>        порт 4000-4099 (обяз.)
   --outbound <tag>     tag существующего outbound'а (обяз.). Должен быть в config.json.
-  --listen <ip>        адрес для прослушки (по умолчанию 192.168.1.1)
+  --listen <ip>        адрес для прослушки (по умолчанию 192.168.99.1)
   --no-backup          (только для тестов) пропустить pre-backup.
 EOF
   exit 64
@@ -56,7 +56,7 @@ EOF
 router=""
 port=""
 outbound=""
-listen="192.168.1.1"
+listen="192.168.99.1"
 no_backup=0
 
 while [ $# -gt 0 ]; do
@@ -134,7 +134,7 @@ else
     echo "add-proxy: backup-now.sh не найден в $OPENWRT_SKILL_HOME/bin/ — починить перед использованием add/remove-vpn/proxy" >&2
     exit 2
   fi
-  if ! snapshot_id="$("$OPENWRT_SKILL_HOME/bin/backup-now.sh" --router "$ROUTER_ALIAS" --label "before add-proxy $port→$outbound" --quiet)"; then
+  if ! snapshot_id="$("$OPENWRT_SKILL_HOME/bin/backup-now.sh" --router "$ROUTER_ALIAS" --label "before add-proxy ${port} to ${outbound}" --quiet)"; then
     echo "add-proxy: backup-now.sh failed — отказываюсь продолжать без снапшота" >&2
     exit 2
   fi

@@ -1,0 +1,38 @@
+#!/bin/sh
+
+set -u
+[ "${ACTION:-}" = released ] || exit 0
+case "${SEEN:-}" in ''|*[!0-9]*) exit 0 ;; esac
+[ "$SEEN" -le 3 ] || exit 0
+
+config=/etc/travel-ap-button.conf
+VISIBLE_SECONDS=600
+[ ! -r "$config" ] || . "$config"
+case "$VISIBLE_SECONDS" in ''|*[!0-9]*) VISIBLE_SECONDS=600 ;; esac
+
+token_file=/tmp/travel-ap-button/token
+hidden_24="$(uci -q get wireless.travel_ap_24.hidden || echo 0)"
+hidden_5="$(uci -q get wireless.travel_ap_5.hidden || echo 0)"
+
+if [ "$hidden_24" = 1 ] && [ "$hidden_5" = 1 ]; then
+  mkdir -p /tmp/travel-ap-button
+  umask 077
+  token="$(date +%s)-$$"
+  printf '%s\n' "$token" >"$token_file"
+  uci set wireless.travel_ap_24.hidden='0'
+  uci set wireless.travel_ap_5.hidden='0'
+  # Keep visibility in UCI's /tmp delta only. The committed configuration stays
+  # hidden, so a reboot during the visibility window fails closed.
+  wifi reload >/dev/null 2>&1 || true
+  logger -t travel-ap-button "private AP visible for $VISIBLE_SECONDS seconds"
+  nohup /usr/libexec/travel-ap-autohide "$token" "$VISIBLE_SECONDS" >/dev/null 2>&1 </dev/null &
+else
+  rm -f "$token_file"
+  uci set wireless.travel_ap_24.hidden='1'
+  uci set wireless.travel_ap_5.hidden='1'
+  uci commit wireless
+  wifi reload >/dev/null 2>&1 || true
+  logger -t travel-ap-button "private AP hidden by button"
+fi
+
+exit 0

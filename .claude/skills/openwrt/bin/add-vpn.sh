@@ -4,7 +4,7 @@
 # Mutates /etc/sing-box/config.json on the router:
 #   * appends a new vless outbound (Reality, xtls-rprx-vision)
 #   * optionally appends the tag to the auto-failover urltest outbound
-#   * optionally adds a mixed inbound on 192.168.1.1:<port> bound to this outbound
+#   * optionally adds a mixed inbound on 192.168.99.1:<port> bound to this outbound
 #   * excludes the new server IP from zapret2 (zapret-ip-user-exclude.txt) so the
 #     DPI-bypass desync does not corrupt the VPN tunnel handshake
 #
@@ -53,7 +53,7 @@ Options:
   --url '<vless://...>'     VLESS URL (обяз.). Парсится локально, секреты не логируются.
   --tag <name>              tag для outbound. По умолчанию берётся из #fragment URL
                             или vpn-N (следующий свободный).
-  --add-proxy-port <port>   также добавить mixed-inbound 192.168.1.1:<port> → этот outbound.
+  --add-proxy-port <port>   также добавить mixed-inbound 192.168.99.1:<port> → этот outbound.
                             Должен быть 4000-4099 и не использоваться.
   --add-to-failover         добавить tag в auto-failover.outbounds (по умолчанию: да).
   --no-add-to-failover      НЕ добавлять в auto-failover.
@@ -453,7 +453,7 @@ jq \
          (.inbounds = ((.inbounds // []) + [{
             type: "mixed",
             tag: ("in-proxy-" + $proxy_port_str),
-            listen: "192.168.1.1",
+            listen: "192.168.99.1",
             listen_port: ($proxy_port_str | tonumber),
             sniff: true
           }]))
@@ -676,7 +676,7 @@ touch "$mem_lock"
   fi
 
   if [ -n "$proxy_port" ] && [ -f "$proxies_md" ]; then
-    prow="| $proxy_port | $tag | через $tag | 192.168.1.1 |"
+    prow="| $proxy_port | $tag | через $tag | 192.168.99.1 |"
     if grep -q '{{PROXY_TABLE_ROWS}}' "$proxies_md"; then
       tmp="$(mktemp)"
       awk -v r="$prow" '{

@@ -131,7 +131,7 @@ SOCKS_EXIT_IP=""
 SOCKS_EXIT_ERR=""
 if [ "$MIXED_4000_PRESENT" = "1" ] && command -v curl >/dev/null 2>&1; then
   # socks5h: hostname resolution via proxy.
-  SOCKS_EXIT_IP="$(curl --max-time 10 -sS --proxy socks5h://192.168.1.1:4000 https://api.ipify.org 2>/tmp/.health_curl_err || true)"
+  SOCKS_EXIT_IP="$(curl --max-time 10 -sS --proxy socks5h://192.168.99.1:4000 https://api.ipify.org 2>/tmp/.health_curl_err || true)"
   SOCKS_EXIT_ERR="$(cat /tmp/.health_curl_err 2>/dev/null | head -3)"
   rm -f /tmp/.health_curl_err 2>/dev/null
 fi

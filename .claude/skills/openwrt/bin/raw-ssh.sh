@@ -7,7 +7,7 @@
 # itself is whatever the user types — not captured.
 #
 # Usage:
-#   bin/raw-ssh.sh --router <alias> [--reason "<text>"] [--allow-mutations]
+#   bin/raw-ssh.sh --router <alias> [--reason "<text>"] [--allow-mutations] [--password-auth]
 #
 # Exit codes:
 #   0   ok (user exited shell cleanly)
@@ -87,7 +87,7 @@ _reject_reason_or_label() {
 
 usage() {
   cat >&2 <<'EOF'
-Usage: bin/raw-ssh.sh --router <alias> [--reason "<text>"] [--allow-mutations]
+Usage: bin/raw-ssh.sh --router <alias> [--reason "<text>"] [--allow-mutations] [--password-auth]
 
 Escape hatch — открывает прямой интерактивный SSH к роутеру.
 Каждый вызов журналируется (reason обязателен по-хорошему).
@@ -96,6 +96,7 @@ Options:
   --router <alias>      alias из memory/routers.yaml (обяз.)
   --reason "<text>"     причина открытия SSH (без секретов). Будет в journal.md.
   --allow-mutations     разрешить mutating-команды в сессии. По умолчанию: read-only баннер.
+  --password-auth       для OEM/stock SSH без ключа: проверять TCP/22, пароль вводится интерактивно.
 
 ВАЖНО: после выхода из сессии запусти:
   bin/doctor.sh --router <alias>   # пересобрать state.md из реального состояния роутера
@@ -106,12 +107,14 @@ EOF
 router=""
 reason=""
 allow_mutations=0
+password_auth=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --router) router="${2:-}"; shift 2 ;;
     --reason) reason="${2:-}"; shift 2 ;;
     --allow-mutations) allow_mutations=1; shift ;;
+    --password-auth) password_auth=1; shift ;;
     -h|--help) usage ;;
     *) echo "raw-ssh: неизвестный аргумент: $1" >&2; usage ;;
   esac
@@ -133,7 +136,12 @@ fi
 # --- Resolve router + SSH alive ------------------------------------------------
 resolve_router_config "$router"
 
-if ! ssh_check_alive 5; then
+if [ "$password_auth" = "1" ]; then
+  if ! nc -z -w 5 "$ROUTER_HOST" 22 >/dev/null 2>&1; then
+    echo "raw-ssh: TCP/22 недоступен для '$ROUTER_ALIAS' (host=$ROUTER_HOST)." >&2
+    exit 2
+  fi
+elif ! ssh_check_alive 5; then
   cat >&2 <<EOF
 raw-ssh: SSH недоступен для '$ROUTER_ALIAS' (host=$ROUTER_HOST, user=$ROUTER_USER).
 Сначала проверь связность: ping -c1 $ROUTER_HOST
@@ -184,6 +192,11 @@ if [ -n "$ROUTER_SSH_KEY" ] && [ -f "$ROUTER_SSH_KEY" ]; then
   ssh_argv+=( -i "$ROUTER_SSH_KEY" )
 fi
 ssh_argv+=( -o "StrictHostKeyChecking=accept-new" -o "ConnectTimeout=15" )
+if [ "$password_auth" = "1" ]; then
+  # Old OEM router firmware may only offer SHA-1 RSA host keys. Keep this
+  # compatibility exception scoped to the explicit password-auth escape hatch.
+  ssh_argv+=( -o "HostKeyAlgorithms=+ssh-rsa" )
+fi
 
 # Best-effort "read-only" hint: when --allow-mutations is NOT set, we just warn
 # loudly. Busybox shell has no robust way to enforce ro $HOME, and trying to

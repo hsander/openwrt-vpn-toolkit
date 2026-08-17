@@ -50,7 +50,7 @@ bin/add-domain.sh --router home --domain example.com --outbound usa
 ### Привязать устройство к стране
 
 ```bash
-bin/pin-device.sh --router home --source-ip 192.168.1.x --outbound usa
+bin/pin-device.sh --router home --source-ip 192.168.99.x --outbound usa
 # → route.rules: source_ip_cidr → usa-pool
 ```
 
@@ -86,12 +86,14 @@ bin/add-domain.sh --router home --domain example.com --outbound usa-4
 ## Удалить ноду из пула
 
 ```bash
-bin/remove-vpn.sh --router home --tag usa-6-dev
-# Если usa-6-dev — последняя нода в usa-pool → exit 13
-# Для принудительного удаления:
-bin/remove-vpn.sh --router home --tag usa-6-dev --force-orphan
-# → usa-pool удалится из config; auto-failover потеряет usa-pool
+bin/remove-pool-members.sh --router home --pool usa-pool --member usa-6-dev
+# Несколько нод удаляются атомарно повторением --member.
+# Outbound-конфигурации и route rules сохраняются.
+# Если после удаления pool станет пустым → exit 13.
 ```
+
+Если требуется удалить сам VPN-outbound вместе с его proxy/rules, используй
+`bin/remove-vpn.sh --router home --tag usa-6-dev`.
 
 ## Диагностика
 
