@@ -107,15 +107,74 @@ echo "nft_rules_count=$NFT_RULES_COUNT"
 PSUB_HEAD="$(nft list set inet sing_box_tproxy proxy_subnets 2>/dev/null | head -10)"
 echo "proxy_subnets_b64=$(printf '%s' "$PSUB_HEAD" | base64 2>/dev/null | tr -d '\n')"
 
-# --- DNS: nslookup of a "well-known proxied domain" against 127.0.0.42 ---
-# We try youtube.com which is conventionally on the VPN list.
-DNS_OUT="$(nslookup youtube.com 127.0.0.42 2>&1 | tail -5)"
+# --- DNS: resolve a currently configured FakeIP domain against dnsmasq's peer ---
+# Do not hard-code a public hostname here: router-specific rule sets can remove
+# it while FakeIP itself remains healthy. Instead, find the first domain from a
+# rule set that the active config assigns to fakeip-dns.
+DNS_PROBE_DOMAIN=""
+DNS_PROBE_SERVER="127.0.0.42"
+
+if command -v uci >/dev/null 2>&1; then
+  DNS_PROBE_SERVER="$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | awk -F'[,#]' 'NR == 1 { gsub(/[[:space:]]/, "", $1); print $1; exit }')"
+fi
+[ -n "$DNS_PROBE_SERVER" ] || DNS_PROBE_SERVER="127.0.0.42"
+
+if command -v jq >/dev/null 2>&1 && [ -f /etc/sing-box/config.json ]; then
+  # Inline domains on a fakeip-dns rule take precedence when present.
+  DNS_PROBE_DOMAIN="$(jq -r '
+    [
+      .dns.rules[]?
+      | select(.server == "fakeip-dns")
+      | ((.domain // .domain_suffix // []) | if type == "array" then .[]? else . end)
+      | select(type == "string" and length > 0)
+    ] | .[0] // empty
+  ' /etc/sing-box/config.json 2>/dev/null)"
+
+  # Most managed domains live in external route.rule_set files. Resolve the
+  # first FakeIP-bound tag to its file, then extract one public domain suffix.
+  if [ -z "$DNS_PROBE_DOMAIN" ]; then
+    DNS_RULESET_PATH="$(jq -r '
+      . as $cfg
+      | [
+          .dns.rules[]?
+          | select(.server == "fakeip-dns")
+          | (.rule_set // [])
+          | if type == "array" then .[]? else . end
+          | select(type == "string")
+        ] as $tags
+      | [
+          $tags[]?
+          | . as $tag
+          | ($cfg.route.rule_set[]? | select(.tag == $tag) | .path)
+          | select(type == "string" and length > 0)
+        ] | .[0] // empty
+    ' /etc/sing-box/config.json 2>/dev/null)"
+    if [ -n "$DNS_RULESET_PATH" ] && [ -f "$DNS_RULESET_PATH" ]; then
+      DNS_PROBE_DOMAIN="$(sed '/^[[:space:]]*\/\//d' "$DNS_RULESET_PATH" 2>/dev/null | jq -r '
+        [
+          .rules[]?
+          | ((.domain // .domain_suffix // []) | if type == "array" then .[]? else . end)
+          | select(type == "string" and length > 0)
+        ] | .[0] // empty
+      ' 2>/dev/null)"
+    fi
+  fi
+fi
+
+DNS_OUT=""
+if [ -n "$DNS_PROBE_DOMAIN" ]; then
+  DNS_OUT="$(nslookup "$DNS_PROBE_DOMAIN" "$DNS_PROBE_SERVER" 2>&1 | tail -5)"
+else
+  DNS_OUT="health: no domain assigned to fakeip-dns"
+fi
 DNS_FAKEIP_OK=0
 # FakeIP convention in sing-box: 198.18.0.0/15.
 if printf '%s' "$DNS_OUT" | grep -qE 'Address[[:space:]]*:?[[:space:]]+198\.(18|19)\.'; then
   DNS_FAKEIP_OK=1
 fi
 echo "dns_fakeip_ok=$DNS_FAKEIP_OK"
+echo "dns_probe_domain=$DNS_PROBE_DOMAIN"
+echo "dns_probe_server=$DNS_PROBE_SERVER"
 echo "dns_out_b64=$(printf '%s' "$DNS_OUT" | base64 2>/dev/null | tr -d '\n')"
 
 # --- Mixed inbound :4000 — does it exist? Then try curl through it. ---
@@ -181,6 +240,8 @@ nft_rules_count="$(get_kv nft_rules_count)"
 nft_out="$(get_b64 nft_out_b64)"
 proxy_subnets_head="$(get_b64 proxy_subnets_b64)"
 dns_fakeip_ok="$(get_kv dns_fakeip_ok)"
+dns_probe_domain="$(get_kv dns_probe_domain)"
+dns_probe_server="$(get_kv dns_probe_server)"
 dns_out="$(get_b64 dns_out_b64)"
 mixed_4000_present="$(get_kv mixed_4000_present)"
 socks_exit_ip="$(get_kv socks_exit_ip)"
@@ -244,6 +305,8 @@ if [ "$emit_json" = "1" ]; then
       --argjson nft_ok "${nft_ok:-0}" \
       --argjson nft_rules_count "${nft_rules_count:-0}" \
       --argjson dns_fakeip_ok "${dns_fakeip_ok:-0}" \
+      --arg dns_probe_domain "${dns_probe_domain:-}" \
+      --arg dns_probe_server "${dns_probe_server:-}" \
       --arg dns_out "$dns_out" \
       --argjson mixed_4000_present "${mixed_4000_present:-0}" \
       --arg socks_exit_ip "${socks_exit_ip:-}" \
@@ -258,7 +321,12 @@ if [ "$emit_json" = "1" ]; then
           init_d_status: $svc_status
         },
         nft: { ok: ($nft_ok == 1), rules_count: $nft_rules_count },
-        dns: { fakeip_ok: ($dns_fakeip_ok == 1), raw: $dns_out },
+        dns: {
+          fakeip_ok: ($dns_fakeip_ok == 1),
+          probe_domain: $dns_probe_domain,
+          probe_server: $dns_probe_server,
+          raw: $dns_out
+        },
         socks_exit: {
           mixed_4000_present: ($mixed_4000_present == 1),
           ip: $socks_exit_ip, err: $socks_exit_err
@@ -290,7 +358,7 @@ cat <<EOF
 | sing-box process | $(icon "$sb_running") | $( [ "$sb_running" = "1" ] && echo "PID $sb_pid" || echo "не запущен" ) |
 | init.d status | $( [ "$svc_status" = "running" ] && echo "✓" || echo "✗" ) | $svc_status |
 | nft table sing_box_tproxy | $(icon "$nft_ok") | rules in mangle_prerouting: $nft_rules_count |
-| DNS → FakeIP (198.18.x) | $(icon "$dns_fakeip_ok") | $(printf '%s' "$dns_out" | tr '\n' ' ' | cut -c1-80) |
+| DNS → FakeIP (198.18.x) | $(icon "$dns_fakeip_ok") | ${dns_probe_domain:-(no FakeIP domain)} via ${dns_probe_server:-?}: $(printf '%s' "$dns_out" | tr '\n' ' ' | cut -c1-80) |
 | mixed inbound :4000 | $(icon "$mixed_4000_present") | $( [ "$mixed_4000_present" = "1" ] && echo "есть" || echo "нет (skip SOCKS test)" ) |
 | SOCKS5 exit IP | $( [ -n "$socks_exit_ip" ] && echo "✓" || echo "—" ) | $( [ -n "$socks_exit_ip" ] && echo "$socks_exit_ip" || echo "${socks_exit_err:-(skipped)}" ) |
 
@@ -325,7 +393,7 @@ else
   echo "**FAIL** — критические probes не прошли:"
   [ "$sb_running" = "1" ] || echo "  - sing-box не запущен"
   [ "$nft_ok" = "1" ] || echo "  - nft table inet sing_box_tproxy отсутствует"
-  [ "$dns_fakeip_ok" = "1" ] || echo "  - DNS не возвращает FakeIP (198.18.x) для youtube.com"
+  [ "$dns_fakeip_ok" = "1" ] || echo "  - DNS не возвращает FakeIP (198.18.x) для ${dns_probe_domain:-(не найден домен для fakeip-dns)}"
 fi
 
 [ "$crit_pass" = "1" ] || exit 1
